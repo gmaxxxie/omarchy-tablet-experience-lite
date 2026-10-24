@@ -8,10 +8,13 @@ import qs.Ui
 //   🎤 voice input overlay (voxtype hold-to-talk)
 //   ⟳  rotation: click = next 90°
 //   🧭  auto-rotate: click = sensor-following on/off
-// The keyboard highlights while the wvkbd layer is mapped; the mic while the
-// hold-to-talk overlay is open; the rotate icon while the screen is not at 0°;
-// the compass while auto-rotate is on. Voice and keyboard are exclusive
-// (Service.qml).
+//
+// In PORTRAIT the bar is much narrower, and four icons collide with the
+// clock/centre widgets. Portrait therefore folds all four into ONE tablet
+// button whose popup offers the same four actions at touch size; landscape
+// keeps the direct one-tap icons. The keyboard highlights while the wvkbd
+// layer is mapped; the mic while the overlay is open; the rotate icon while
+// the screen is not at 0°; the compass while auto-rotate is on.
 Panel {
   id: root
   moduleName: "maxt.tablet-lite"
@@ -19,12 +22,30 @@ Panel {
 
   property var service: bar ? bar.shell.serviceFor("maxt.tablet-lite") : null
 
+  // Transform 1/3 = 90°/270° = portrait. When auto-rotate is on, `rotation`
+  // is updated by every sensor-driven apply, so one check covers both paths;
+  // the orientation label is a fallback for the instant before that lands.
+  readonly property bool portrait: {
+    if (!root.service) return false
+    var r = String(root.service.rotation || "")
+    if (r === "1" || r === "3") return true
+    if (root.service.autoOrient) {
+      var o = String(root.service.orientation || "")
+      return o === "left-up" || o === "right-up"
+    }
+    return false
+  }
+
   implicitWidth: row.implicitWidth
   implicitHeight: row.implicitHeight
 
   function refresh() {
     if (root.service) root.service.pollVk()
   }
+
+  // Rotating back to landscape with the portrait popup open would leave a
+  // popup anchored to a hidden button; close it on every such transition.
+  onPortraitChanged: if (!root.portrait) root.close()
 
   Row {
     id: row
@@ -34,6 +55,7 @@ Panel {
     WidgetButton {
       id: keyboardButton
       bar: root.bar
+      visible: !root.portrait
       text: "\uF11C"          // fa-keyboard
       active: root.service ? root.service.vkVisible : false
       tooltipText: root.service && root.service.vkVisible
@@ -49,6 +71,7 @@ Panel {
     WidgetButton {
       id: voiceButton
       bar: root.bar
+      visible: !root.portrait
       text: "\uF130"          // fa-microphone
       active: root.service ? root.service.voiceInputOpen : false
       tooltipText: root.service && root.service.voiceInputOpen
@@ -62,6 +85,7 @@ Panel {
     WidgetButton {
       id: rotateButton
       bar: root.bar
+      visible: !root.portrait
       text: "\uF2F9"          // fa-rotate-right
       active: root.service
         ? (!root.service.autoOrient && root.service.rotation !== "0") : false
@@ -77,6 +101,7 @@ Panel {
     WidgetButton {
       id: autoRotateButton
       bar: root.bar
+      visible: !root.portrait
       text: "\uF14E"          // fa-compass
       active: root.service ? root.service.autoOrient : false
       tooltipText: root.service && root.service.autoOrient
@@ -84,6 +109,99 @@ Panel {
         : "Auto-rotate off — tap to follow the device's sensor"
       onPressed: function() {
         if (root.service) root.service.toggleAutoRotate()
+      }
+    }
+
+    // Portrait: one button instead of four, so the bar does not collide with
+    // the centre clock. The popup carries the same four actions.
+    WidgetButton {
+      id: tabletButton
+      bar: root.bar
+      visible: root.portrait
+      text: "\uF10A"          // fa-tablet
+      active: root.opened || (root.service
+        && (root.service.vkVisible || root.service.voiceInputOpen
+            || root.service.autoOrient))
+      tooltipText: "Tablet controls — keyboard / voice / rotation"
+      onPressed: function() {
+        root.toggle()
+      }
+    }
+  }
+
+  PopupCard {
+    id: panel
+    anchorItem: tabletButton
+    owner: root
+    bar: root.bar
+    open: root.opened && root.portrait
+    triggerMode: "click"
+    contentWidth: panel.fittedContentWidth(Style.space(240))
+    contentHeight: panel.fittedContentHeight(controlList.implicitHeight)
+
+    Column {
+      id: controlList
+      anchors.fill: parent
+      anchors.margins: Style.spacing.popupPadding
+      spacing: Style.spacing.sm
+
+      PanelSectionHeader {
+        text: "Tablet"
+      }
+
+      Button {
+        width: parent.width
+        height: Style.space(44)
+        iconText: "\uF11C"      // fa-keyboard
+        text: root.service && root.service.vkVisible ? "Keyboard (up)" : "Keyboard"
+        active: root.service ? root.service.vkVisible : false
+        onClicked: {
+          if (root.service) root.service.toggleVk()
+          root.close()
+        }
+      }
+
+      Button {
+        width: parent.width
+        height: Style.space(44)
+        iconText: "\uF130"      // fa-microphone
+        text: root.service && root.service.voiceInputOpen ? "Voice (open)" : "Voice input"
+        active: root.service ? root.service.voiceInputOpen : false
+        onClicked: {
+          if (root.service) root.service.toggleVoiceInput()
+          root.close()
+        }
+      }
+
+      Button {
+        width: parent.width
+        height: Style.space(44)
+        iconText: "\uF2F9"      // fa-rotate-right
+        text: root.service
+          ? "Rotate 90° (" + root.service.rotationLabel(root.service.rotation) + ")"
+          : "Rotate 90°"
+        onClicked: {
+          if (root.service) root.service.rotationNext()
+          root.close()
+        }
+      }
+
+      Button {
+        width: parent.width
+        height: Style.space(44)
+        iconText: "\uF14E"      // fa-compass
+        text: root.service && root.service.autoOrient
+          ? "Auto-rotate: on" : "Auto-rotate: off"
+        active: root.service ? root.service.autoOrient : false
+        onClicked: {
+          if (root.service) root.service.toggleAutoRotate()
+          root.close()
+        }
+      }
+
+      Item {
+        width: parent.width
+        height: Style.space(8)
       }
     }
   }

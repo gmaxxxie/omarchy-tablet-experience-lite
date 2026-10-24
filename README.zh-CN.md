@@ -35,6 +35,11 @@
   按钮，键盘被 **▼** 收起后可再次调出；解锁时自动放下。shell 启动时会预启动
   键盘并隐藏，锁屏下升起时不需要在已锁定的会话里新建 Wayland 客户端。
 
+- **竖屏时状态栏自动折叠** —— 在 90°/270° 竖屏下，四个触控图标（键盘 /
+  语音 / 旋转 / 自动旋转）折叠成一个**平板按钮**，点开弹窗后以触屏大小提供
+  同样四个操作；横屏仍保留一键直达的四个图标。这样竖屏窄状态栏里图标不会
+  再和时钟挤在一起。
+
 有意去掉：笔记本/平板状态机、键盘自动切换、手写、窗口管理、状态栏精简、
 多点触控手势、SDDM 登录界面改动（锁屏已支持）。
 
@@ -87,6 +92,7 @@ omarchy plugin add https://github.com/gmaxxxie/omarchy-tablet-experience-lite.gi
 | 旋转 90° | `SUPER+SHIFT+R` · 状态栏 **⟳** · `omarchy-shell maxt.tablet-lite rotationNext` |
 | 传感器自动旋转 | 状态栏 **🧭** · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
 | 指定角度 | `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
+| 竖屏状态栏 | 四个图标折叠成一个**平板按钮** → 弹窗里选键盘 / 语音 / 旋转 / 自动 |
 | 锁屏键盘 | 锁屏自动升起；密码框右侧浮动 **⌨** 按钮可重调；**▼** 收起 |
 | 开/关语音浮层 | 状态栏 **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |
 | 说话输入 | 按住大麦克风，松开转写 |

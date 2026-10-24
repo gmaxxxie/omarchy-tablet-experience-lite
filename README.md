@@ -42,6 +42,12 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   put back down on unlock. The keyboard is pre-started hidden at shell start
   so raising it under the lock never has to connect a new Wayland client.
 
+- **Portrait-folded bar controls** — at 90°/270° the four touch icons
+  (keyboard / voice / rotate / auto-rotate) collapse into **one tablet
+  button** whose popup carries the same four actions at touch size; landscape
+  keeps the direct one-tap icons. This stops the icons colliding with the
+  clock on the narrower portrait bar.
+
 Deliberately absent: laptop/tablet state machine, keyboard-auto-switch,
 handwriting, window management, bar decluttering, multi-touch gestures, SDDM
 greeter changes (the lock screen is supported).
@@ -96,6 +102,7 @@ and `wtype` are already installed. Every modified file gets a
 | Rotate 90° | `SUPER+SHIFT+R` · bar **⟳** · `omarchy-shell maxt.tablet-lite rotationNext` |
 | Sensor auto-rotate | bar **🧭** · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
 | Set an exact angle | `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
+| Portrait bar | the four icons fold into one **tablet** button → popup with keyboard / voice / rotate / auto |
 | Lock screen keyboard | raises automatically on lock; floating **⌨** button right of the password field; **▼** folds it |
 | Open/close voice input | bar **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |
 | Dictate | press & hold the big mic, release to transcribe |
