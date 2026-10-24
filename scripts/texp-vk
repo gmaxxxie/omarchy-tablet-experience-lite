@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""
+texp-vk — virtual keyboard helper for the tablet experience.
+
+Subcommands:
+  daemon   Watch the Wacom touchscreen; a one-finger swipe starting in the
+           bottom strip and moving upward shows the keyboard; a downward drag
+           in the keyboard area (while visible) dismisses it. Left/right edge
+           swipes are untouched (Hyprland workspace swipe owns those).
+           NOTE (v1.2.1): the daemon is NOT autostarted by default — the
+           swipe gesture was disabled on request; `texp-vk toggle` (SUPER+U,
+           bar button, 3-finger tap) needs no daemon. Re-enable by adding
+           `o.launch_on_start("texp-vk daemon")` to autostart.lua.
+  toggle   Show/hide the on-screen keyboard now (used by Super+U / bar
+           button / 3-finger tap). The keyboard is started on demand.
+  show     Show the keyboard now (start on demand if needed).
+  hide     Hide the keyboard (used by the voice-input <-> keyboard
+           exclusivity in Service.qml).
+  start-hidden  Start the keyboard backend WITHOUT changing its visibility
+           (used on tablet entry so the lock screen can show it by signal
+           later — no new Wayland client has to connect while the session
+           is already locked).
+  debug    (hidden) log every touch decision to stderr for diagnostics.
+
+Keyboard backend (v1.12): primary is **wvkbd-deskintl** — wlroots-native,
+with Ctrl / Super / Alt / Shift / AltGr, F1-F12, a full number row (Chinese
+candidate selection) and arrows, sized for the tablet. squeekboard is used
+as a fallback when wvkbd-deskintl is not installed. Visibility is mirrored
+to $XDG_STATE_HOME/texp-vk/visible so the shell (BarWidget / Service.qml)
+can highlight the bar icon and enforce voice-input <-> keyboard exclusivity
+without D-Bus introspection.
+
+Note: the device is opened without grab(); events are only observed, never
+consumed, so Hyprland still receives every touch.
+"""
+
+import json
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import time
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+TOUCH_NAME_KEYS = tuple(os.environ.get(
+    "OMARCHY_TOUCH_NAME", "wacom finger").split())      # match device by name substring
+BOTTOM_RATIO = 0.88        # up-swipe must START in the bottom 12% of the screen
+MOVE_THRESHOLD = 150       # upward travel (raw device units) to count
+DOWN_ZONE_RATIO = 0.68     # down-swipe allowed when keyboard is visible AND
+                           #   start is below this line (keyboard top + margin)
+DOWN_THRESHOLD = 220       # downward travel (raw units) to dismiss
+COOLDOWN = 1.0             # seconds between gesture actions
+START_TIMEOUT = 6.0        # max seconds to wait for the keyboard to come up
+DEBUG = os.environ.get("OMARCHY_VK_DEBUG") == "1"
+
+# ---------------------------------------------------------------------------
+# Keyboard backend (v1.12): wvkbd-deskintl primary, squeekboard fallback.
+# ---------------------------------------------------------------------------
+VK_WVKBD = "wvkbd-deskintl"
+# The lite install builds a hide-key-only wvkbd into the user's bin. Prefer it
+# explicitly: on a machine that also has the full plugin's /usr/local copy,
+# PATH would otherwise pick the wrong (handwriting-capable) build.
+VK_WVKBD_LOCAL = os.path.expanduser("~/.local/bin/wvkbd-deskintl")
+VK_SQUEEK = "squeekboard"
+STATE_DIR = os.path.join(os.environ.get(
+    "XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "texp-vk")
+STATE_FILE = os.path.join(STATE_DIR, "visible")
+# wvkbd panel heights (px) — big so the keys stay comfortable on the tablet.
+VK_HEIGHT_LANDSCAPE = os.environ.get("OMARCHY_VK_HEIGHT_LANDSCAPE", "350")
+VK_HEIGHT_PORTRAIT = os.environ.get("OMARCHY_VK_HEIGHT_PORTRAIT", "350")
+
+# wvkbd theming (v1.14): match the ACTIVE Omarchy theme. Colors are resolved
+# at spawn time from `omarchy theme color --all` (one call), so a theme
+# switch applies on the next keyboard open. Disable with OMARCHY_VK_THEME=off.
+VK_THEME = os.environ.get("OMARCHY_VK_THEME", "auto") != "off"
+
+# wvkbd flag -> (Omarchy semantic color key, fallback hex). Fallbacks are the
+# Gruvbox dark palette (the Omarchy default) used when the lookup fails, so
+# the keyboard still looks right on a stock install.
+VK_THEME_MAP = (
+    ("--bg",            "background",         "#282828"),
+    ("--fg",            "lighter_background", "#3c3836"),
+    ("--fg-sp",         "selection",          "#504945"),
+    ("--press",         "accent",             "#7daea3"),
+    ("--press-sp",      "accent",             "#7daea3"),
+    ("--swipe",         "accent",             "#7daea3"),
+    ("--swipe-sp",      "accent",             "#7daea3"),
+    ("--text",          "foreground",         "#d4be98"),
+    ("--text-sp",       "light_foreground",   "#bdae93"),
+    ("--text-press",    "darker_background",  "#161616"),
+    ("--text-press-sp", "darker_background",  "#161616"),
+    ("--text-swipe",    "darker_background",  "#161616"),
+    ("--text-swipe-sp", "darker_background",  "#161616"),
+)
+
+DBUS_SVC = "sm.puri.OSK0"
+DBUS_PATH = "/sm/puri/OSK0"
+DBUS_IFACE = "sm.puri.OSK0"
+
+
+def dlog(msg):
+    if DEBUG:
+        print(msg, file=sys.stderr, flush=True)
+
+
+def run_cap(cmd, timeout=5.0, max_bytes=131072, text=False):
+    """Run cmd capturing at most max_bytes of stdout; watchdog-kill the whole
+    process group if it does not exit in time or emits too much (security
+    review finding 3). Returns str (text=True) or bytes, truncated at cap."""
+    import signal
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+    except (FileNotFoundError, PermissionError):
+        return "" if text else b""
+    buf = bytearray()
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            rem = deadline - time.monotonic()
+            if rem <= 0:
+                break
+            r, _, _ = select.select([p.stdout], [], [], max(0.0, rem))
+            if not r:
+                break
+            chunk = os.read(p.stdout.fileno(), 65536)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            if len(buf) >= max_bytes:
+                break
+    finally:
+        # watchdog: terminate the full process group so no child lingers
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            p.wait(timeout=1)
+        except subprocess.SubprocessError:
+            try:
+                p.kill()
+            except Exception:
+                pass
+    out = bytes(buf[:max_bytes])
+    return out.decode("utf-8", "replace") if text else out
+
+
+# ---------------------------------------------------------------------------
+# Keyboard control (backend-agnostic; wvkbd via signals, squeekboard via D-Bus)
+# ---------------------------------------------------------------------------
+def vk_binary():
+    """Full path to wvkbd-deskintl (user build first, then PATH), or ""."""
+    if os.access(VK_WVKBD_LOCAL, os.X_OK):
+        return VK_WVKBD_LOCAL
+    return shutil.which(VK_WVKBD) or ""
+
+
+def vk_backend():
+    """Return the binary name to control: wvkbd-deskintl if present, else
+    squeekboard."""
+    return VK_WVKBD if vk_binary() else VK_SQUEEK
+
+
+def vk_running():
+    try:
+        return bool(run_cap(["pgrep", "-x", vk_backend()], timeout=3,
+                            max_bytes=4096).strip())
+    except Exception:
+        return False
+
+
+def vk_visible():
+    """True when a wvkbd layer is actually mapped.
+
+    `hyprctl layers` is the same source the shell polls, and unlike the state
+    file it stays correct when the keyboard is folded away with its own ▼
+    key (wvkbd hides by unmapping; nothing writes the state file then).
+    """
+    out = run_cap(["hyprctl", "layers", "-j"], timeout=3,
+                  max_bytes=1 << 20, text=True)
+    try:
+        data = json.loads(out or "{}")
+        for output in data.values():
+            for layers in (output.get("levels") or {}).values():
+                for layer in layers or []:
+                    if "wvkbd" in str(layer.get("namespace", "")):
+                        return True
+    except Exception:
+        pass
+    # Fallback for a compositor without `hyprctl layers`.
+    try:
+        return open(STATE_FILE).read().strip() == "visible"
+    except OSError:
+        return False
+
+
+def write_state(visible):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        f.write("visible\n" if visible else "hidden\n")
+
+
+def vk_theme_args():
+    """wvkbd color args matching the active Omarchy theme; [] when theming
+    is disabled or the theme lookup fails (wvkbd defaults take over)."""
+    if not VK_THEME:
+        return []
+    colors = {}
+    try:
+        out = run_cap(["omarchy", "theme", "color", "--all"], timeout=5,
+                      max_bytes=65536, text=True)
+        for line in out.splitlines():
+            key, _, val = line.partition("\t")
+            if re.fullmatch(r"#[0-9a-fA-F]{6}", val.strip()):
+                colors[key] = val.strip()
+    except Exception:
+        pass
+    args = []
+    for flag, key, fallback in VK_THEME_MAP:
+        # wvkbd-deskintl does NOT accept a '#' prefix on color args (a '#'
+        # hex is silently ignored and the default palette is used) — strip it.
+        args += [flag, colors.get(key, fallback).lstrip("#")]
+    return args
+
+
+def start_vk():
+    name = vk_backend()
+    if vk_running():
+        return name
+    if name == VK_WVKBD:
+        subprocess.run(["setsid", vk_binary(), "--hidden",
+                        "-H", VK_HEIGHT_PORTRAIT, "-L", VK_HEIGHT_LANDSCAPE]
+                       + vk_theme_args(),
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       start_new_session=True)
+    else:
+        subprocess.run(["setsid", VK_SQUEEK],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       start_new_session=True)
+    deadline = time.monotonic() + START_TIMEOUT
+    while not vk_running() and time.monotonic() < deadline:
+        time.sleep(0.2)
+    return name
+
+
+def set_visible(visible):
+    name = start_vk()
+    if name == VK_WVKBD:
+        # wvkbd: SIGUSR2 = show, SIGUSR1 = hide
+        subprocess.run(["pkill", "-USR2" if visible else "-USR1", "-x", VK_WVKBD],
+                       capture_output=True, timeout=3)
+    else:
+        subprocess.run(["busctl", "--user", "call", DBUS_SVC, DBUS_PATH,
+                        DBUS_IFACE, "SetVisible", "b",
+                        "true" if visible else "false"],
+                       capture_output=True, timeout=3)
+    write_state(visible)
+
+
+def toggle_vk():
+    set_visible(not vk_visible())
+
+
+def show_vk():
+    set_visible(True)
+
+
+def hide_vk():
+    set_visible(False)
+
+
+def start_hidden():
+    """Pre-start the backend without showing it (lock-screen path: the
+    keyboard must already be running before the session locks, so the lock
+    can flip it visible with a signal instead of opening a new Wayland
+    client under the lock)."""
+    start_vk()
+
+
+# ---------------------------------------------------------------------------
+# Touch device discovery
+# ---------------------------------------------------------------------------
+def find_touch_device():
+    """Return (path, unreadable_count). path=None means no touch device was
+    found; unreadable_count>0 means /dev/input nodes exist but could not be
+    opened (missing permissions — access may be granted later, keep retrying).
+    """
+    import evdev
+    from evdev import ecodes
+    matches = []
+    skipped = 0
+    nodes = 0
+    for path in sorted(p for p in os.listdir("/dev/input")
+                       if p.startswith("event")):
+        nodes += 1
+        try:
+            dev = evdev.InputDevice(f"/dev/input/{path}")
+        except PermissionError:
+            skipped += 1
+            continue
+        except OSError:
+            continue
+        try:
+            name = (dev.name or "").lower()
+            spec = dev.capabilities().get(ecodes.EV_ABS, ())
+            codes = [s[0] if isinstance(s, tuple) else s for s in spec]
+            has_mt = ecodes.ABS_MT_POSITION_Y in codes
+        finally:
+            dev.close()
+        if has_mt and all(k in name for k in TOUCH_NAME_KEYS):
+            matches.append(path)
+    dlog(f"texp-vk: scanned /dev/input ({nodes} nodes, unreadable: {skipped})")
+    if not matches:
+        return None, skipped
+    return f"/dev/input/{matches[-1]}", skipped   # wacom finger usually last
+
+
+# ---------------------------------------------------------------------------
+# daemon: bottom-edge upward swipe -> show; downward drag -> dismiss
+# ---------------------------------------------------------------------------
+def daemon():
+    import evdev
+    from evdev import ecodes
+
+    # Boot/autostart race: /dev/input/* may be unreadable at login (logind
+    # uaccess ACLs/udev settle, or the project's install.sh input grant has
+    # not run yet) — the scan then reports "no device" while the hardware is
+    # actually there. Retry while that is the case; only give up when no
+    # event node exists at all (touchscreen gone).
+    path = None
+    unreadable = 0
+    last_log = 0.0
+    while path is None:
+        path, unreadable = find_touch_device()
+        if path is None:
+            if unreadable == 0:
+                print("texp-vk: no /dev/input nodes at all — touchscreen "
+                      "absent; exiting", file=sys.stderr)
+                return 2
+            now = time.monotonic()
+            if now - last_log >= 30.0:
+                last_log = now
+                print(f"texp-vk: touch device not readable ({unreadable} "
+                      f"nodes permission-denied) — retrying; run "
+                      f"install.sh (sudo) to grant input access",
+                      file=sys.stderr)
+            time.sleep(3.0)
+
+    try:
+        dev = evdev.InputDevice(path)
+    except PermissionError:
+        print(f"texp-vk: cannot open {path} (permission denied — is the "
+              f"user in the 'input' group / do the devices carry logind "
+              f"uaccess ACLs?)", file=sys.stderr)
+        return 2
+    # NOTE: deliberately NO grab() — passive observation only.
+
+    absinfo = dev.absinfo(ecodes.ABS_MT_POSITION_Y)
+    y_max = absinfo.max
+    bottom_y = int(y_max * BOTTOM_RATIO)
+    down_zone = int(y_max * DOWN_ZONE_RATIO)
+    dlog(f"texp-vk: watching {dev.path} ({dev.name}); y_max={y_max}, "
+         f"up needs start>={bottom_y}, down zone>={down_zone}")
+
+    # Track per slot -> touch-id -> [start_y, fired_this_touch].
+    # Note: single-touch streams are slot-less (bare TRACKING_ID/X/Y);
+    # multi-touch streams DO carry ABS_MT_SLOT (see texp-touch + AUDIT
+    # Phase 11). This daemon only drives single-finger gestures.
+    # Linux reports a release as TRACKING_ID=-1 on the ACTIVE slot; we remove
+    # the tracking ID that was bound to that slot, never a literal -1 key
+    # (security review finding 1: the old code did touches.pop(-1), leaking
+    # every real tracking ID -> unbounded memory growth while the daemon
+    # runs). A malformed stream is capped and reset.
+    MAX_TRACKED_TOUCHES = 16
+    touches = {}    # tid -> [start_y, fired]
+    slot_tid = {}   # slot -> current tracking id
+    active_slot = 0
+    last_action = 0.0
+
+    def prune_touches():
+        if len(touches) > MAX_TRACKED_TOUCHES or len(slot_tid) > MAX_TRACKED_TOUCHES:
+            touches.clear()
+            slot_tid.clear()
+
+    for event in dev.read_loop():
+        if event.type != ecodes.EV_ABS:
+            continue
+        if event.code == ecodes.ABS_MT_SLOT:
+            active_slot = event.value
+        elif event.code == ecodes.ABS_MT_TRACKING_ID:
+            tid = event.value
+            if tid >= 0:
+                touches[tid] = [None, False]
+                slot_tid[active_slot] = tid
+            else:
+                # release: remove the tracking id that was on this slot
+                prev = slot_tid.pop(active_slot, None)
+                if prev is not None:
+                    touches.pop(prev, None)
+            prune_touches()
+        elif event.code == ecodes.ABS_MT_POSITION_Y:
+            # attribute to the tid on the active slot; slot-less streams keep
+            # it on slot 0; fall back to the newest live tid when unknown
+            tid = slot_tid.get(active_slot)
+            if tid is None:
+                tid = max(touches.keys(), default=None)
+            if tid is None:
+                continue
+            state = touches[tid]
+            if state[0] is None:
+                state[0] = event.value
+            elif not state[1] and time.monotonic() - last_action >= COOLDOWN:
+                start_y = state[0]
+                upward = start_y - event.value
+                downward = event.value - start_y
+                dlog(f"Y {event.value} (start {start_y}) up={upward} down={downward} "
+                     f"bottom={bottom_y} downzone={down_zone} vis={vk_visible()}")
+                if upward >= MOVE_THRESHOLD and start_y >= bottom_y:
+                    if not vk_visible():
+                        dlog("-> SHOW")
+                        set_visible(True)
+                    state[1] = True
+                    last_action = time.monotonic()
+                elif (downward >= DOWN_THRESHOLD and start_y >= down_zone
+                      and vk_visible()):
+                    dlog("-> HIDE")
+                    set_visible(False)
+                    state[1] = True
+                    last_action = time.monotonic()
+
+
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    args = [a for a in sys.argv[1:] if a != "--debug"] or ["help"]
+    if "--debug" in sys.argv[1:]:
+        DEBUG = True
+    cmd = args[0]
+    if cmd == "daemon":
+        sys.exit(daemon())
+    if cmd == "toggle":
+        toggle_vk()
+    elif cmd == "show":
+        show_vk()
+    elif cmd == "hide":
+        hide_vk()
+    elif cmd == "start-hidden":
+        start_hidden()
+    else:
+        print(__doc__)

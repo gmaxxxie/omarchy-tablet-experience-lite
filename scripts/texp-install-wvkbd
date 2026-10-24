@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# ============================================================================
+# texp-install-wvkbd — build wvkbd-deskintl for the current user.
+#
+# The lite plugin's keyboard is wvkbd-deskintl (deskintl layout): wlroots
+# native, with Ctrl / Super / Alt / Shift / AltGr, F1-F12, a full number row
+# and arrows. The Arch `wvkbd` package only ships the phone-style
+# `wvkbd-mobintl`, so this helper builds the deskintl binary from the pinned
+# upstream tarball and applies the lite patch: a visible ▼ collapse key that
+# folds the keyboard away (wvkbd ships no dismiss key).
+#
+# Everything runs as the user and installs to ~/.local/bin — no sudo, no
+# root-owned build tree, no SDDM/greeter copy. texp-vk prefers that path.
+# squeekboard remains the fallback when this build is not present or fails.
+#
+# The archive is verified against a pinned SHA-256 before extraction.
+#
+# Usage:
+#   texp-install-wvkbd            build & install
+#   texp-install-wvkbd --dry-run  preview only
+# ============================================================================
+set -euo pipefail
+
+WVKBD_VERSION="0.20"
+WVKBD_URL="https://git.sr.ht/~proycon/wvkbd/archive/v0.20.tar.gz"
+WVKBD_SHA256="330e7d41e2ccf3f984af701c0d055d919cff66710dfe05ce9d77e4ae6e1adc16"
+MAX_ARCHIVE_BYTES=8388608
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PATCH="$REPO_ROOT/config/wvkbd/wvkbd-hide-key.patch"
+BIN="${BIN_DIR:-$HOME/.local/bin}"
+DEST="$BIN/wvkbd-deskintl"
+DRY_RUN=0
+[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+
+log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*" >&2; }
+run()  { if [ "$DRY_RUN" -eq 1 ]; then printf '    would run: %s\n' "$*"; else "$@"; fi }
+
+[ "$DRY_RUN" -eq 1 ] && log "DRY RUN — nothing will be changed"
+
+# The lite build is identified by the ▼ label and the ABSENCE of the full
+# plugin's 手写/texp-ink-key hook.
+has_lite_keys() {
+  grep -q $'\xE2\x96\xBC' "$1" 2>/dev/null && ! grep -q 'texp-ink-key' "$1" 2>/dev/null
+}
+
+if [ -x "$DEST" ] && has_lite_keys "$DEST"; then
+  log "wvkbd-deskintl (lite build with ▼) already installed: $DEST"
+  exit 0
+fi
+
+if [ "$DRY_RUN" -eq 0 ]; then
+  missing=()
+  for pc in cairo pango wayland-client xkbcommon; do
+    pkg-config --exists "$pc" 2>/dev/null || missing+=("$pc")
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    warn "missing build dependencies: ${missing[*]}"
+    warn "install with: sudo pacman -S --needed cairo pango wayland libxkbcommon"
+    warn "until then texp-vk falls back to squeekboard"
+    exit 1
+  fi
+  for tool in make cc curl tar patch sha256sum; do
+    command -v "$tool" >/dev/null 2>&1 || { warn "missing tool: $tool"; exit 1; }
+  done
+  [ -f "$PATCH" ] || { warn "hide-key patch missing: $PATCH"; exit 1; }
+fi
+
+tmp="$(mktemp -d)"
+cleanup() { rm -rf "$tmp"; }
+trap cleanup EXIT
+
+log "downloading wvkbd v$WVKBD_VERSION"
+run curl -fsSL --proto '=https' --max-time 120 \
+  --max-filesize "$MAX_ARCHIVE_BYTES" -o "$tmp/wvkbd.tar.gz" "$WVKBD_URL"
+if [ "$DRY_RUN" -eq 0 ]; then
+  echo "$WVKBD_SHA256  $tmp/wvkbd.tar.gz" | sha256sum -c - >/dev/null \
+    || { warn "wvkbd source archive SHA-256 mismatch — refusing to build"; exit 1; }
+  log "source archive SHA-256 verified"
+  tar -xzf "$tmp/wvkbd.tar.gz" -C "$tmp"
+  src="$tmp/wvkbd-v$WVKBD_VERSION"
+  [ -d "$src" ] || src="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d -name 'wvkbd*' | head -1)"
+  [ -d "$src" ] || { warn "could not locate the extracted wvkbd source"; exit 1; }
+  log "applying the ▼ collapse-key patch"
+  ( cd "$src" && patch -p1 <"$PATCH" >/dev/null )
+  log "building deskintl layout (Ctrl/Super/Alt + F-keys + numbers + arrows + ▼)"
+  ( cd "$src" && make LAYOUT=deskintl >/dev/null )
+  run mkdir -p "$BIN"
+  run install -m 0755 "$src/wvkbd-deskintl" "$DEST"
+  log "installed: $DEST"
+  log "texp-vk now prefers this keyboard; squeekboard stays as the fallback"
+else
+  printf '    would verify SHA-256 %s\n' "$WVKBD_SHA256"
+  printf '    would extract, apply patch, make LAYOUT=deskintl\n'
+  printf '    would install to %s\n' "$DEST"
+fi

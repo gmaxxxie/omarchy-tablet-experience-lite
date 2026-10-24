@@ -1,0 +1,16 @@
+# Logs / backups
+*.log
+*.bak*
+
+# Python
+__pycache__/
+*.pyc
+
+# Local verification artifacts
+verify/
+
+# Editors / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
