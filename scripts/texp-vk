@@ -15,7 +15,8 @@ Subcommands:
   show     Show the keyboard now (start on demand if needed).
   hide     Hide the keyboard (used by the voice-input <-> keyboard
            exclusivity in Service.qml).
-  start-hidden  Start the keyboard backend WITHOUT changing its visibility.
+  start-hidden  Start the keyboard backend and force it hidden (used at
+           shell start so the lock can raise it by signal later).
   debug    (hidden) log every touch decision to stderr for diagnostics.
 
 Keyboard backend: primary is **wvkbd-deskintl** — wlroots-native, with
@@ -272,11 +273,14 @@ def hide_vk():
 
 
 def start_hidden():
-    """Pre-start the backend without showing it (lock-screen path: the
-    keyboard must already be running before the session locks, so the lock
-    can flip it visible with a signal instead of opening a new Wayland
-    client under the lock)."""
-    start_vk()
+    """Pre-start the backend and make sure it is hidden.
+
+    The lock screen needs the keyboard already running before the session
+    locks, so it can flip it visible with a signal instead of opening a new
+    Wayland client under the lock. Forcing hidden also fixes a keyboard left
+    visible by a previous session.
+    """
+    set_visible(False)
 
 
 # ---------------------------------------------------------------------------
