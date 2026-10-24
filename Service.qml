@@ -47,7 +47,7 @@ Item {
   Component.onCompleted: console.log("tablet-lite Service LOADED v" + root.pluginVersion)
 
   property var shell: null
-  readonly property string pluginVersion: "1.4.0"
+  readonly property string pluginVersion: "1.4.1"
 
   // Voice input (voxtype hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing
@@ -82,6 +82,9 @@ Item {
   property string appliedFor: ""
   property bool pendingRelative: false
   property int liveTransform: 0
+  // Live orientation from hyprctl (not the persisted preference), so the bar
+  // folds in portrait even if the display was rotated outside this service.
+  readonly property bool portrait: root.liveTransform === 1 || root.liveTransform === 3
   readonly property var rotationRing: ["0", "1", "2", "3"]
 
   PersistentProperties {
@@ -420,6 +423,10 @@ Item {
     if (!lockProbe.running) lockProbe.running = true
   }
 
+  function pollTransform() {
+    if (!transformProbe.running) transformProbe.running = true
+  }
+
   // ---- probes ------------------------------------------------------------
 
   BoundedProcess {
@@ -561,6 +568,7 @@ Item {
       root.pollVoxtype()
       root.pollVk()
       root.pollLock()
+      root.pollTransform()
     }
   }
 
@@ -943,6 +951,8 @@ Item {
         vkVisible: root.vkVisible,
         rotation: root.rotation,
         rotationLabel: root.rotationLabel(root.rotation),
+        liveTransform: root.liveTransform,
+        portrait: root.portrait,
         autoOrient: root.autoOrient,
         orientation: root.orientation,
         locked: root.locked,

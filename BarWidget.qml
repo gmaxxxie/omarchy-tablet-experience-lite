@@ -22,19 +22,10 @@ Panel {
 
   property var service: bar ? bar.shell.serviceFor("maxt.tablet-lite") : null
 
-  // Transform 1/3 = 90°/270° = portrait. When auto-rotate is on, `rotation`
-  // is updated by every sensor-driven apply, so one check covers both paths;
-  // the orientation label is a fallback for the instant before that lands.
-  readonly property bool portrait: {
-    if (!root.service) return false
-    var r = String(root.service.rotation || "")
-    if (r === "1" || r === "3") return true
-    if (root.service.autoOrient) {
-      var o = String(root.service.orientation || "")
-      return o === "left-up" || o === "right-up"
-    }
-    return false
-  }
+  // Live monitor transform from the service (1/3 = 90°/270° = portrait).
+  // Reading the live transform, not the persisted preference, keeps the bar
+  // folded even when the display was rotated outside the plugin.
+  readonly property bool portrait: root.service ? root.service.portrait : false
 
   implicitWidth: row.implicitWidth
   implicitHeight: row.implicitHeight
