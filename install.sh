@@ -128,7 +128,7 @@ if [ "$VERIFY" -eq 1 ]; then
   fi
 
   if command -v omarchy-shell >/dev/null 2>&1 \
-      && omarchy-shell -q maxt.tablet-lite getState >/dev/null 2>&1; then
+      && [ -n "$(omarchy-shell maxt.tablet-lite getState 2>/dev/null)" ]; then
     ok "plugin IPC answers (maxt.tablet-lite)"
   else
     warn "plugin IPC does not answer yet — reload the shell / re-login"
