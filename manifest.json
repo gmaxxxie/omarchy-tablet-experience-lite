@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "maxt.tablet-lite",
   "name": "Tablet Lite",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "maxt",
   "license": "MIT",
   "description": "The simplified tablet experience: virtual keyboard and voice input only. On-screen wvkbd keyboard (Ctrl/Super/Alt, F-keys, number row, arrows, a ▼ collapse key) plus voxtype hold-to-talk with Delete/Clear/Enter, a caret pad and a CLI-keys grid for touch-only terminals.",

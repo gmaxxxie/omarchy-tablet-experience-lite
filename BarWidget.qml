@@ -12,7 +12,7 @@ import qs.Ui
 Panel {
   id: root
   moduleName: "maxt.tablet-lite"
-  ipcTarget: "maxt.tablet-lite"
+  ipcTarget: "maxt.tablet-lite-window"
 
   property var service: bar ? bar.shell.serviceFor("maxt.tablet-lite") : null
 
