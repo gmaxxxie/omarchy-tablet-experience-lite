@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# texp-rotate — rotate the primary display (detachable tablet experience).
+#
+# Usage: texp-rotate [-s] [--scale <V>] <0|1|2|3|next|prev>
+#   -s   silent: skip the OSD notification (used by auto-orientation)
+#   --scale <V>   override the monitor scale instead of preserving the
+#                 current one (the laptop-mode reset restores its snapshot)
+#   0 = landscape  1 = portrait 90°  2 = flipped 180°  3 = portrait 270°
+#   next            cycle to the following orientation (0°→90°→180°→270°→0°)
+#   prev            cycle backwards
+#
+# Prints the resulting transform (0-3) as the last stdout line, so the
+# tablet-experience service can persist the angle after a relative step.
+#
+# Display: defaults to the FIRST Hyprland monitor (usually the internal
+# panel); override with OMARCHY_ROTATE_DISPLAY.
+#
+# Uses the Hyprland 0.56 Lua runtime API (hyprctl eval).
+#
+# Touch alignment: Hyprland does NOT re-map touch coords when the output
+# rotates — the touch device keeps libinput's calibration matrix
+# (input:touchdevice:transform, default 0 = identity), so a rotated screen
+# would mis-map taps. We therefore set the touch-device transform to the SAME
+# value as the monitor transform; the daemon in texp-touch mirrors this
+# matrix when resolving touch points to logical coords.
+set -eu
+
+DISP="${OMARCHY_ROTATE_DISPLAY:-$(hyprctl monitors -j 2>/dev/null | grep -o '"name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)}"
+[ -n "$DISP" ] || DISP="eDP-1"
+SILENT=0
+OPT_SCALE=""
+ARG=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -s|--silent) SILENT=1; shift ;;
+    --scale) OPT_SCALE="${2:-}"; shift 2 ;;
+    --scale=*) OPT_SCALE="${1#--scale=}"; shift ;;
+    *) ARG="$1"; shift ;;
+  esac
+done
+ARG="${ARG:-0}"
+
+case "$ARG" in
+  0) N=0; label="landscape 0°" ;;
+  1) N=1; label="portrait 90°" ;;
+  2) N=2; label="flipped 180°" ;;
+  3) N=3; label="portrait 270°" ;;
+  next|prev)
+    cur="$(hyprctl monitors -j | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["transform"])' 2>/dev/null || echo 0)"
+    if [ "$ARG" = "next" ]; then N=$(( (cur + 1) % 4 )); else N=$(( (cur + 3) % 4 )); fi
+    ;;
+  *) echo "usage: texp-rotate [-s] <0|1|2|3|next|prev>" >&2; exit 2 ;;
+esac
+
+case "$N" in
+  0) label="landscape 0°" ;;
+  1) label="portrait 90°" ;;
+  2) label="flipped 180°" ;;
+  3) label="portrait 270°" ;;
+esac
+
+# Preserve the monitor scale: hl.monitor() without a scale field re-derives a
+# default from EDID/DPI and silently resets the user's scale (observed
+# 1.25 -> 1.6 on a laptop->tablet->laptop round trip). Default = keep the
+# CURRENT scale so rotation never changes it; --scale overrides (the laptop
+# exit restores the snapshot taken on tablet entry).
+if [ -n "$OPT_SCALE" ]; then
+  SCALE="$OPT_SCALE"
+else
+  SCALE="$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys
+ms=json.load(sys.stdin)
+want=sys.argv[1]
+m=next((x for x in ms if x.get("name")==want), None)
+print(str(m["scale"]) if m and m.get("scale") else "1")' "$DISP" 2>/dev/null || echo 1)"
+fi
+case "$SCALE" in
+  ''|*[!0-9.]*) SCALE=1 ;;
+esac
+
+hyprctl eval "hl.monitor({ output = \"${DISP}\", transform = ${N}, scale = ${SCALE} })" >/dev/null
+# Keep the touch device's calibration matrix in step with the screen, or taps
+# land mirrored/mis-mapped on a rotated display.
+hyprctl eval "hl.config({ input = { touchdevice = { transform = ${N} } } })" >/dev/null 2>&1 || true
+if [ "$SILENT" -eq 0 ]; then
+  omarchy osd -i rotate-cw -m "Rotate: ${label}" >/dev/null 2>&1 || true
+fi
+
+printf '%s\n' "$N"

@@ -4,9 +4,16 @@ import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 
-// Tablet Lite — the simplified tablet experience: virtual keyboard + voice
-// input only. No laptop/tablet state machine, no rotation, no handwriting, no
-// window manager, no bar declutter.
+// Tablet Lite — the simplified tablet experience: virtual keyboard, voice
+// input and screen rotation. No laptop/tablet state machine, no handwriting,
+// no window manager, no bar declutter.
+//
+// Rotation: the bar's rotate icon and SUPER+SHIFT+R step the display through
+// 0° / 90° / 180° / 270°; right-clicking the icon (or the IPC method) turns on
+// sensor-following auto-rotate via `texp-orient` (sysfs accelerometer). Every
+// rotation preserves the monitor scale and keeps the touch calibration matrix
+// in step (texp-rotate). The last angle is persisted, so a shell restart does
+// not silently put the screen back to landscape.
 //
 // Voice input: the bar's mic icon opens a bottom hold-to-talk button.
 // Press & hold -> `voxtype record start` (SIGUSR1), release -> `voxtype record
@@ -30,13 +37,15 @@ import qs.Commons
 //   getState | voiceInputToggle | voiceInputShow | voiceInputHide
 //   keyboardToggle | keyboardShow | keyboardHide
 //   cliKeysToggle | clearNow
+//   rotationNext | rotateLeft | rotateRight | setRotation <auto|0|1|2|3>
+//   autoRotateToggle | setAutoOrient <on|off>
 Item {
   id: root
 
   Component.onCompleted: console.log("tablet-lite Service LOADED v" + root.pluginVersion)
 
   property var shell: null
-  readonly property string pluginVersion: "1.0.3"
+  readonly property string pluginVersion: "1.1.0"
 
   // Voice input (voxtype hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing
@@ -56,6 +65,23 @@ Item {
   property bool vkVisible: false
   property string vkOutput: ""
   property real vkHeight: 0
+
+  // Rotation state. `rotation` is the last applied transform (0-3); "auto" is
+  // a separate flag because the sensor keeps changing the live angle.
+  readonly property string rotation: persisted.rotation
+  readonly property bool autoOrient: persisted.autoOrient
+  property string orientation: "unknown"
+  property string appliedFor: ""
+  property bool pendingRelative: false
+  property int liveTransform: 0
+  readonly property var rotationRing: ["0", "1", "2", "3"]
+
+  PersistentProperties {
+    id: persisted
+    reloadableId: "maxt-tablet-lite"
+    property string rotation: ""
+    property bool autoOrient: false
+  }
 
   property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || ""
   readonly property string voxtypeStateDir: root.runtimeDir + "/voxtype"
@@ -99,6 +125,126 @@ Item {
   BoundedProcess { id: cliCmd }
   BoundedProcess { id: vkCmd }
   BoundedProcess { id: mousehopCmd }
+  BoundedProcess {
+    id: rotateCmd
+    deadlineMs: 8000
+    onStreamFinished: {
+      // Relative steps print the resulting transform; persist it so the next
+      // shell start restores the angle the user actually ended up at.
+      if (root.pendingRelative) {
+        root.pendingRelative = false
+        var m = /^([0-3])\s*$/.exec(String(output || "").trim())
+        if (m) {
+          persisted.rotation = m[1]
+          root.liveTransform = Number(m[1])
+        }
+      }
+    }
+  }
+  BoundedProcess { id: osdCmd }
+
+  // ---- rotation ----------------------------------------------------------
+
+  function rotationLabel(value) {
+    var v = String(value || "")
+    if (root.autoOrient || v === "auto") return "auto"
+    if (v === "1") return "90°"
+    if (v === "2") return "180°"
+    if (v === "3") return "270°"
+    return "0°"
+  }
+
+  // Sensor posture -> Hyprland transform (same convention as the full plugin).
+  function rotationTransform(label) {
+    if (label === "left-up") return "1"
+    if (label === "right-up") return "3"
+    if (label === "bottom-up") return "2"
+    return "0"
+  }
+
+  function osd(icon, message) {
+    if (osdCmd.running) return
+    osdCmd.command = ["omarchy", "osd", "-i", icon, "-m", message]
+    osdCmd.running = true
+  }
+
+  // Apply one absolute transform. `silent` suppresses the texp-rotate OSD
+  // (used for startup restore and sensor-following); manual actions show it.
+  function applyRotation(value, silent) {
+    if (rotateCmd.running) return false
+    var t = String(value || "0")
+    if (root.rotationRing.indexOf(t) === -1) t = "0"
+    var cmd = ["texp-rotate"]
+    if (silent) cmd.push("-s")
+    cmd.push(t)
+    rotateCmd.command = cmd
+    rotateCmd.running = true
+    persisted.rotation = t
+    root.liveTransform = Number(t)
+    return true
+  }
+
+  // One 90° step from the CURRENT transform: `next` counter-clockwise,
+  // `prev` clockwise (same convention as the full plugin).
+  function rotateStep(dir) {
+    if (rotateCmd.running) return
+    persisted.autoOrient = false
+    root.appliedFor = ""
+    root.pendingRelative = true
+    rotateCmd.command = ["texp-rotate", dir]
+    rotateCmd.running = true
+  }
+
+  function rotationNext() { root.rotateStep("next") }
+  function rotationPrev() { root.rotateStep("prev") }
+
+  // Bar right-click / IPC: sensor-following on/off. Turning it off keeps the
+  // screen where the sensor last put it.
+  function toggleAutoRotate() {
+    persisted.autoOrient = !persisted.autoOrient
+    root.appliedFor = ""
+    if (persisted.autoOrient) {
+      root.osd("rotate-cw", "Auto-rotate: on (sensor)")
+      root.pollOrientation()
+    } else {
+      root.osd("rotate-cw", "Auto-rotate: off")
+    }
+  }
+
+  function setRotationPreset(value) {
+    var v = String(value || "").toLowerCase()
+    if (v === "auto") {
+      if (!persisted.autoOrient) root.toggleAutoRotate()
+      else root.pollOrientation()
+      return
+    }
+    if (root.rotationRing.indexOf(v) === -1) return
+    persisted.autoOrient = false
+    root.appliedFor = ""
+    root.applyRotation(v, false)
+  }
+
+  function applyOrientation() {
+    if (!persisted.autoOrient) return
+    if (root.orientation === "unknown") return
+    if (root.appliedFor === root.orientation) return
+    if (root.applyRotation(root.rotationTransform(root.orientation), true))
+      root.appliedFor = root.orientation
+  }
+
+  function pollOrientation() {
+    if (!persisted.autoOrient) return
+    if (!orientationProbe.running) orientationProbe.running = true
+  }
+
+  // Runs once after the shell starts (PersistentProperties restore may be
+  // asynchronous): restore the last angle, or adopt the current one on first
+  // install. Auto mode starts the sensor poll instead.
+  function initRotation() {
+    if (persisted.autoOrient) { root.pollOrientation(); return }
+    if (persisted.rotation) root.applyRotation(persisted.rotation, true)
+    else if (!transformProbe.running) transformProbe.running = true
+  }
 
   // ---- voice input -------------------------------------------------------
 
@@ -301,6 +447,56 @@ Item {
     watchChanges: true
     printErrors: false
     onFileChanged: if (!vxStateProbe.running) vxStateProbe.running = true
+  }
+
+  // Rotation probes: the sensor posture (texp-orient reads sysfs, no daemon)
+  // and the current monitor transform (to adopt the angle on first install).
+  BoundedProcess {
+    id: orientationProbe
+    command: ["texp-orient", "--json"]
+    onStreamFinished: {
+      var o = "unknown"
+      try {
+        var d = JSON.parse(output || "")
+        if (d && typeof d.label === "string") o = d.label
+      } catch (e) {}
+      root.orientation = o
+      root.applyOrientation()
+    }
+  }
+
+  BoundedProcess {
+    id: transformProbe
+    command: ["hyprctl", "monitors", "-j"]
+    onStreamFinished: {
+      try {
+        var ms = JSON.parse(output || "[]")
+        if (!Array.isArray(ms) || ms.length === 0) return
+        var t = String(Number(ms[0].transform || 0))
+        root.liveTransform = Number(t)
+        if (!persisted.rotation) persisted.rotation = t
+      } catch (e) {}
+    }
+  }
+
+  Timer {
+    id: autoPoller
+    interval: 1500
+    running: persisted.autoOrient
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.pollOrientation()
+  }
+
+  // The shell may restore PersistentProperties asynchronously; wait before
+  // applying the saved angle so a stale empty value cannot reset the screen.
+  Timer {
+    id: settleTimer
+    interval: 2500
+    running: true
+    repeat: false
+    triggeredOnStart: true
+    onTriggered: root.initRotation()
   }
 
   Timer {
@@ -644,6 +840,10 @@ Item {
         vkVisible: root.vkVisible,
         vkOutput: root.vkOutput,
         vkHeight: root.vkHeight,
+        rotation: root.rotation,
+        rotationLabel: root.rotationLabel(root.rotation),
+        autoOrient: root.autoOrient,
+        orientation: root.orientation,
         version: root.pluginVersion
       })
     }
@@ -686,6 +886,39 @@ Item {
     function clearNow(): string {
       root.clearInput()
       return "ok"
+    }
+
+    function rotationNext(): string {
+      root.rotationNext()
+      return root.rotationLabel(root.rotation)
+    }
+
+    function rotateLeft(): string {
+      root.rotateStep("next")
+      return root.rotationLabel(root.rotation)
+    }
+
+    function rotateRight(): string {
+      root.rotateStep("prev")
+      return root.rotationLabel(root.rotation)
+    }
+
+    function setRotation(value: string): string {
+      root.setRotationPreset(String(value || "").toLowerCase())
+      return root.rotationLabel(root.rotation)
+    }
+
+    function autoRotateToggle(): string {
+      root.toggleAutoRotate()
+      return root.autoOrient ? "on" : "off"
+    }
+
+    function setAutoOrient(value: string): string {
+      var v = String(value || "").toLowerCase()
+      var on = (v === "on" || v === "true" || v === "1" || v === "yes")
+      if (on !== root.autoOrient) root.toggleAutoRotate()
+      else if (on) root.pollOrientation()
+      return root.autoOrient ? "on" : "off"
     }
   }
 }

@@ -10,11 +10,12 @@
 # clone or the installed plugin directory:
 #
 #   1. helper daemons -> ~/.local/bin/texp-vk, texp-vtext, texp-voxtype-wire,
-#      texp-mousehop, texp-install-wvkbd
+#      texp-mousehop, texp-install-wvkbd, texp-rotate, texp-orient
 #   2. wvkbd-deskintl -> a user-local build with the ▼ collapse key
 #      (~/.local/bin/wvkbd-deskintl; squeekboard stays as the fallback)
-#   3. Hyprland hooks  -> SUPER+U (virtual keyboard) + above_lock for wvkbd in
-#      ~/.config/hypr/tablet-lite.lua, required from hyprland.lua
+#   3. Hyprland hooks  -> SUPER+U (virtual keyboard), SUPER+SHIFT+R (rotation)
+#      and above_lock for wvkbd in ~/.config/hypr/tablet-lite.lua, required
+#      from hyprland.lua
 #   4. voxtype wiring  -> post-processing (tech-term replacements) and the
 #      mousehop release hook right before typing
 #
@@ -83,7 +84,7 @@ if [ "$VERIFY" -eq 1 ]; then
   log "Tablet Lite self-check (read-only)"
   fail=0
 
-  for s in texp-vk texp-vtext texp-voxtype-wire texp-mousehop texp-install-wvkbd; do
+  for s in texp-vk texp-vtext texp-voxtype-wire texp-mousehop texp-install-wvkbd texp-rotate texp-orient; do
     if [ -x "$BIN_DIR/$s" ]; then ok "helper $BIN_DIR/$s"; else bad "helper missing: $BIN_DIR/$s"; fail=1; fi
   done
 
@@ -103,6 +104,16 @@ if [ "$VERIFY" -eq 1 ]; then
     ok "hyprland.lua requires hypr.tablet-lite"
   else
     bad "hyprland.lua does not require hypr.tablet-lite"; fail=1
+  fi
+  if grep -qF 'maxt.tablet-lite rotationNext' "$HYPR_DIR/tablet-lite.lua" 2>/dev/null; then
+    ok "SUPER+SHIFT+R -> rotationNext"
+  else
+    bad "rotation keybind missing from $HYPR_DIR/tablet-lite.lua"; fail=1
+  fi
+  if "$BIN_DIR/texp-orient" --json >/dev/null 2>&1; then
+    ok "accelerometer readable (texp-orient)"
+  else
+    warn "texp-orient could not read an IIO accelerometer — auto-rotate will not work"
   fi
 
   if command -v voxtype >/dev/null 2>&1; then
@@ -247,6 +258,8 @@ Done.
              omarchy-shell maxt.tablet-lite keyboardToggle
   Voice    : the bar 🎤 button (press & hold the big mic), or
              omarchy-shell maxt.tablet-lite voiceInputToggle
+  Rotation : SUPER+SHIFT+R, or the bar ⟳ button (click = next 90°,
+             right-click = sensor auto-rotate on/off)
 
 Reload the shell once so the plugin loads fresh (or re-login), then check with:
   ./install.sh --verify

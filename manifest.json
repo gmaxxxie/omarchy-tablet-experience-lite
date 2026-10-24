@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "maxt.tablet-lite",
   "name": "Tablet Lite",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "author": "maxt",
   "license": "MIT",
-  "description": "The simplified tablet experience: virtual keyboard and voice input only. On-screen wvkbd keyboard (Ctrl/Super/Alt, F-keys, number row, arrows, a ▼ collapse key) plus voxtype hold-to-talk with Delete/Clear/Enter, a caret pad and a CLI-keys grid for touch-only terminals.",
+  "description": "The simplified tablet experience: virtual keyboard, voice input and screen rotation. On-screen wvkbd keyboard (Ctrl/Super/Alt, F-keys, number row, arrows, a ▼ collapse key), voxtype hold-to-talk with Delete/Clear/Enter, a caret pad and a CLI-keys grid, plus 90° rotation and sensor auto-rotate (scale and touch calibration preserved).",
   "kinds": [
     "service",
     "bar-widget"
@@ -15,8 +15,8 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Tablet lite: keyboard + voice",
-    "description": "On-screen keyboard toggle + voice input (voxtype hold-to-talk)",
+    "displayName": "Tablet lite: keyboard + voice + rotation",
+    "description": "On-screen keyboard toggle + voice input + screen rotation (90° steps / sensor auto)",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"

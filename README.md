@@ -1,9 +1,9 @@
 # Omarchy Tablet Lite
 
-**The tablet experience, reduced to two things: an on-screen keyboard and voice
-input.** A lite sibling of
+**The tablet experience, reduced to what a touch screen actually needs: an
+on-screen keyboard, voice input, and screen rotation.** A lite sibling of
 [omarchy-tablet-experience](https://github.com/gmaxxxie/omarchy-tablet-experience),
-for a 2-in-1 where the rest (rotation, mode switching, handwriting, window
+for a 2-in-1 where the rest (laptop/tablet mode switching, handwriting, window
 management, bar decluttering) is noise.
 
 Chinese version: [README.zh-CN.md](README.zh-CN.md)
@@ -26,10 +26,16 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
 - Voice and keyboard are **mutually exclusive**: opening one closes the other.
 - **CLI keys + caret pad also ride with the keyboard**, parked just above the
   real wvkbd surface, so `esc` / `⌃C` stay reachable while typing by hand.
+- **Rotation** — the bar **⟳** button and **`SUPER+SHIFT+R`** step the display
+  through 0° / 90° / 180° / 270°. Left-click the icon = next 90°; right-click
+  toggles **sensor-following auto-rotate** (`texp-orient`, sysfs accelerometer,
+  calibrated for the ThinkPad X12). Every rotation **preserves the monitor
+  scale** and keeps Hyprland's **touch calibration matrix** in step
+  (`texp-rotate`), and the last angle is persisted across shell restarts.
 
-Deliberately absent: laptop/tablet state machine, rotation, auto-orientation,
-keyboard-auto-switch, handwriting, window management, bar decluttering,
-multi-touch gestures, lock/login-screen integration.
+Deliberately absent: laptop/tablet state machine, keyboard-auto-switch,
+handwriting, window management, bar decluttering, multi-touch gestures,
+lock/login-screen integration.
 
 ## Requirements
 
@@ -78,6 +84,9 @@ and `wtype` are already installed. Every modified file gets a
 |---|---|
 | Toggle virtual keyboard | `SUPER+U` · bar **⌨** · `omarchy-shell maxt.tablet-lite keyboardToggle` |
 | Fold the keyboard away | its **▼** key |
+| Rotate 90° | `SUPER+SHIFT+R` · bar **⟳** left-click · `omarchy-shell maxt.tablet-lite rotationNext` |
+| Sensor auto-rotate | bar **⟳** right-click · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
+| Set an exact angle | `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
 | Open/close voice input | bar **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |
 | Dictate | press & hold the big mic, release to transcribe |
 | Fix the text | **Delete** (BackSpace) / **Clear** (select-all+delete; readline `Ctrl+A`+`Ctrl+K` in terminals) / **Enter** |
@@ -85,7 +94,9 @@ and `wtype` are already installed. Every modified file gets a
 | Agent keys (pi / codex) | **CLI keys ▲** → `esc` `/` `tab` `⇧tab` `⌃C` `⌃D` `⌃J` `⌃T` |
 
 IPC: `getState` · `voiceInputToggle|Show|Hide` · `keyboardToggle|Show|Hide` ·
-`cliKeysToggle` · `clearNow` (`omarchy-shell maxt.tablet-lite <method>`).
+`cliKeysToggle` · `clearNow` · `rotationNext|rotateLeft|rotateRight` ·
+`setRotation <auto|0|1|2|3>` · `autoRotateToggle` · `setAutoOrient <on|off>`
+(`omarchy-shell maxt.tablet-lite <method>`).
 
 ## Files
 
@@ -94,10 +105,12 @@ Service.qml             QML service: voice overlay, caret/CLI pad, VK state
 BarWidget.qml           bar buttons: ⌨ keyboard + 🎤 voice
 scripts/texp-vk         keyboard toggle/show/hide (wvkbd or squeekboard)
 scripts/texp-install-wvkbd  user-local wvkbd-deskintl build (pinned + SHA-256)
+scripts/texp-rotate      rotate display + touch matrix, preserve scale
+scripts/texp-orient      IIO accelerometer posture probe (auto-rotate)
 scripts/texp-vtext      voxtype post-processing (technical-term table)
 scripts/texp-voxtype-wire   voxtype pre_output hook (mousehop release)
 scripts/texp-mousehop   hand a software-KVM input capture back before typing
-config/hypr/tablet-lite.lua  SUPER+U + above_lock rule
+config/hypr/tablet-lite.lua  SUPER+U + SUPER+SHIFT+R + above_lock rule
 config/wvkbd/wvkbd-hide-key.patch  ▼ collapse key
 config/voxtype/replacements.tsv    default replacement table
 ```

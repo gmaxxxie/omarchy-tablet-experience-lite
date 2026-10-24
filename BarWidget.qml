@@ -3,12 +3,13 @@ import Quickshell
 import qs.Commons
 import qs.Ui
 
-// Tablet Lite — bar widget: the two entry points this plugin exists for.
+// Tablet Lite — bar widget: the three entry points this plugin exists for.
 //   ⌨  on-screen keyboard (same as SUPER+U / `texp-vk toggle`)
 //   🎤 voice input overlay (voxtype hold-to-talk)
-// The keyboard half highlights while the wvkbd layer is mapped; the mic half
-// highlights while the hold-to-talk overlay is open. Voice input and the
-// keyboard are mutually exclusive (Service.qml closes the other one).
+//   ⟳  rotation: click = next 90°, right-click = sensor auto-rotate on/off
+// The keyboard highlights while the wvkbd layer is mapped; the mic while the
+// hold-to-talk overlay is open; the rotate icon while auto-rotate is on.
+// Voice input and the keyboard are mutually exclusive (Service.qml).
 Panel {
   id: root
   moduleName: "maxt.tablet-lite"
@@ -53,6 +54,24 @@ Panel {
         : "Voice input — hold to talk (voxtype)"
       onPressed: function() {
         if (root.service) root.service.toggleVoiceInput()
+      }
+    }
+
+    WidgetButton {
+      id: rotateButton
+      bar: root.bar
+      text: "\uF2F9"          // fa-rotate-right
+      active: root.service ? root.service.autoOrient : false
+      tooltipText: root.service
+        ? (root.service.autoOrient
+            ? "Auto-rotate on — click: next 90°, right-click: off"
+            : "Rotate " + root.service.rotationLabel(root.service.rotation)
+              + " — click: next 90° (SUPER+SHIFT+R), right-click: auto")
+        : "Rotate"
+      onPressed: function(btn) {
+        if (!root.service) return
+        if (btn === Qt.RightButton) root.service.toggleAutoRotate()
+        else root.service.rotationNext()
       }
     }
   }
