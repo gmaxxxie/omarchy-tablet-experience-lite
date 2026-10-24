@@ -21,8 +21,10 @@ import qs.Commons
 // cursor with wtype (CJK works everywhere). Delete / Clear / Enter fix or
 // submit the dictated line, the left-side caret pad moves through it, and the
 // expandable "CLI keys" grid sends esc / / / tab / ⇧tab / ⌃C / ⌃D / ⌃J / ⌃T
-// for pi / codex CLI on a touch-only screen. The overlay follows voxtype's own
-// state file, so the visuals agree with the F9 / SUPER+CTRL+X hotkeys too.
+// for pi / codex CLI on a touch-only screen. The pad is voice-mode only —
+// with the keyboard up, the keyboard itself carries those keys. The overlay
+// follows voxtype's own state file, so the visuals agree with the F9 /
+// SUPER+CTRL+X hotkeys too.
 //
 // Virtual keyboard: `texp-vk` drives wvkbd-deskintl (a wlroots-native build
 // with Ctrl/Super/Alt, F-keys, a number row and arrows). Controllable from
@@ -45,7 +47,7 @@ Item {
   Component.onCompleted: console.log("tablet-lite Service LOADED v" + root.pluginVersion)
 
   property var shell: null
-  readonly property string pluginVersion: "1.2.0"
+  readonly property string pluginVersion: "1.2.1"
 
   // Voice input (voxtype hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing
@@ -60,11 +62,9 @@ Item {
   property bool transcribing: false
   property bool voxtypeUp: false
 
-  // On-screen keyboard visibility + the geometry of the real wvkbd surface
-  // (the CLI/caret pad parks just above it).
+  // On-screen keyboard visibility (the CLI/caret pad is voice-mode only and
+  // deliberately does not float above the keyboard).
   property bool vkVisible: false
-  property string vkOutput: ""
-  property real vkHeight: 0
 
   // Lock-screen keyboard. The Omarchy lock view is a Quickshell
   // ext-session-lock surface; wvkbd and the floating invoke button are
@@ -445,8 +445,6 @@ Item {
     command: ["hyprctl", "layers", "-j"]
     onStreamFinished: {
       var vis = false
-      var vkOut = ""
-      var vkH = 0
       try {
         var d = JSON.parse(output || "{}")
         for (var out in d) {
@@ -454,18 +452,16 @@ Item {
           for (var lvl in levels) {
             var arr = levels[lvl] || []
             for (var i = 0; i < arr.length; i++) {
-              var ns = String(arr[i].namespace || "")
-              if (ns.indexOf("wvkbd") !== -1) {
+              if (String(arr[i].namespace || "").indexOf("wvkbd") !== -1) {
                 vis = true
-                vkOut = String(out)
-                vkH = Math.max(vkH, Number(arr[i].h) || 0)
+                break
               }
             }
+            if (vis) break
           }
+          if (vis) break
         }
       } catch (e) {}
-      root.vkOutput = vis ? vkOut : ""
-      root.vkHeight = vis ? vkH : 0
       root.onVkState(vis ? "visible" : "hidden")
     }
   }
@@ -725,9 +721,9 @@ Item {
   }
 
   // --------------------------------------- caret + CLI key pad (bottom-left)
-  // Shown with voice input (bottom margin 40 == the voice bar's button row)
-  // and with the on-screen keyboard (parked 12 px above the probed wvkbd
-  // surface). Only the output that actually hosts the keyboard gets the pad.
+  // Voice-mode only: with the on-screen keyboard up, the keyboard already
+  // carries Esc / Tab / Ctrl / arrows, so the pad would just cover content
+  // above it. Bottom margin 40 == the voice bar's button row.
   Variants {
     model: Quickshell.screens
     delegate: Component {
@@ -735,9 +731,7 @@ Item {
         id: dirPad
         required property var modelData
         screen: modelData
-        readonly property bool vkHere: root.vkVisible
-          && String(root.vkOutput) === String(modelData.name || "")
-        visible: !root.locked && (root.voiceInputOpen || vkHere)
+        visible: !root.locked && root.voiceInputOpen
         color: "transparent"
         WlrLayershell.namespace: "maxt-tablet-dirpad"
         WlrLayershell.layer: WlrLayer.Top
@@ -745,10 +739,7 @@ Item {
         exclusionMode: ExclusionMode.Ignore
 
         anchors { bottom: true; left: true }
-        margins {
-          bottom: root.voiceInputOpen ? 40 : Math.max(root.vkHeight + 12, 40)
-          left: 28
-        }
+        margins { bottom: 40; left: 28 }
         implicitWidth: 232
         // Collapsed = toggle bar + caret arrows (32 + 8 + 44 = 84).
         // Expanded adds the 4x2 CLI grid above the bar (96 + 8 + 32 + 8 + 44).
@@ -950,8 +941,6 @@ Item {
         voiceRecording: root.recording,
         voxtypeUp: root.voxtypeUp,
         vkVisible: root.vkVisible,
-        vkOutput: root.vkOutput,
-        vkHeight: root.vkHeight,
         rotation: root.rotation,
         rotationLabel: root.rotationLabel(root.rotation),
         autoOrient: root.autoOrient,

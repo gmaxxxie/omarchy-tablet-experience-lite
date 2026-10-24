@@ -24,8 +24,9 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   it; the expandable **CLI keys** grid sends `esc` `/` `tab` `⇧tab` `⌃C` `⌃D`
   `⌃J` `⌃T` for pi / codex CLI on a touch-only screen.
 - Voice and keyboard are **mutually exclusive**: opening one closes the other.
-- **CLI keys + caret pad also ride with the keyboard**, parked just above the
-  real wvkbd surface, so `esc` / `⌃C` stay reachable while typing by hand.
+- **CLI keys + caret pad are voice-mode only** — they appear with the
+  hold-to-talk overlay, where there is no keyboard. With the keyboard up they
+  are hidden: the keyboard itself already carries Esc / Tab / Ctrl / arrows.
 - **Rotation** — the bar **⟳** button and **`SUPER+SHIFT+R`** step the display
   through 0° / 90° / 180° / 270°. Left-click the icon = next 90°; right-click
   toggles **sensor-following auto-rotate** (`texp-orient`, sysfs accelerometer,
