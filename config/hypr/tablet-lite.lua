@@ -5,12 +5,20 @@
 --     lite build is present, squeekboard otherwise).
 --   * SUPER+SHIFT+R asks the plugin for the next 90° rotation, so the angle is
 --     persisted and sensor-following turns off.
---   * `above_lock 2` keeps wvkbd visible and interactive above the Omarchy
---     lock surface, so a keyboard raised for password entry is not hidden.
+--   * `above_lock 2` keeps wvkbd and the lock-screen keyboard button
+--     (maxt-tablet-vk-toggle) visible and interactive above the Omarchy lock
+--     surface, so a keyboard raised for password entry is not hidden.
 -- Laptop/tablet mode switching, touch gestures, handwriting and bar
 -- decluttering are deliberately absent.
 hl.layer_rule({
   match = { namespace = "wvkbd" },
+  above_lock = 2,
+})
+
+-- The lock-screen “keyboard” button sits right of the password field and must
+-- be interactive on top of the Quickshell lock surface too.
+hl.layer_rule({
+  match = { namespace = "maxt-tablet-vk-toggle" },
   above_lock = 2,
 })
 

@@ -110,6 +110,11 @@ if [ "$VERIFY" -eq 1 ]; then
   else
     bad "rotation keybind missing from $HYPR_DIR/tablet-lite.lua"; fail=1
   fi
+  if grep -qF 'maxt-tablet-vk-toggle' "$HYPR_DIR/tablet-lite.lua" 2>/dev/null; then
+    ok "lock-screen VK button above_lock rule"
+  else
+    bad "lock-screen VK layer rule missing from $HYPR_DIR/tablet-lite.lua"; fail=1
+  fi
   if "$BIN_DIR/texp-orient" --json >/dev/null 2>&1; then
     ok "accelerometer readable (texp-orient)"
   else
@@ -260,6 +265,8 @@ Done.
              omarchy-shell maxt.tablet-lite voiceInputToggle
   Rotation : SUPER+SHIFT+R, or the bar ⟳ button (click = next 90°,
              right-click = sensor auto-rotate on/off)
+  Lock     : the keyboard auto-raises on lock; the floating ⌨ button right
+             of the password field re-invokes it after ▼ folds it away
 
 Reload the shell once so the plugin loads fresh (or re-login), then check with:
   ./install.sh --verify

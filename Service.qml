@@ -45,7 +45,7 @@ Item {
   Component.onCompleted: console.log("tablet-lite Service LOADED v" + root.pluginVersion)
 
   property var shell: null
-  readonly property string pluginVersion: "1.1.0"
+  readonly property string pluginVersion: "1.2.0"
 
   // Voice input (voxtype hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing
@@ -65,6 +65,14 @@ Item {
   property bool vkVisible: false
   property string vkOutput: ""
   property real vkHeight: 0
+
+  // Lock-screen keyboard. The Omarchy lock view is a Quickshell
+  // ext-session-lock surface; wvkbd and the floating invoke button are
+  // rendered above it via the above_lock layer rules in tablet-lite.lua.
+  // `locked` mirrors `omarchy-shell lock status`; lockVkShown remembers that
+  // WE raised the keyboard so it can be put down again on unlock.
+  property bool locked: false
+  property bool lockVkShown: false
 
   // Rotation state. `rotation` is the last applied transform (0-3); "auto" is
   // a separate flag because the sensor keeps changing the live angle.
@@ -350,6 +358,15 @@ Item {
     if (mode === "keyboard") root.toggleVk()
   }
 
+  // Pre-start the keyboard HIDDEN at shell start, so the lock screen can
+  // raise it with a signal instead of connecting a new Wayland client while
+  // the session is already locked (the flaky corner for ext-session-lock).
+  function preStartVk() {
+    if (vkCmd.running) return
+    vkCmd.command = ["texp-vk", "start-hidden"]
+    vkCmd.running = true
+  }
+
   function releaseMousehop() {
     if (mousehopCmd.running) return
     mousehopCmd.command = ["texp-mousehop", "release"]
@@ -381,6 +398,26 @@ Item {
 
   function pollVoxtype() {
     if (!vxStateProbe.running) vxStateProbe.running = true
+  }
+
+  // Lock state: locked -> raise the keyboard for the password field (typing
+  // and fingerprint both stay available); unlocked -> put it back down. The
+  // show is unconditional so a stale visibility state cannot skip the raise.
+  function onLockState(next) {
+    var changed = next !== root.locked
+    root.locked = next
+    if (!changed) return
+    if (next) {
+      root.lockVkShown = true
+      root.showVk()
+    } else if (root.lockVkShown) {
+      root.lockVkShown = false
+      root.hideVk()
+    }
+  }
+
+  function pollLock() {
+    if (!lockProbe.running) lockProbe.running = true
   }
 
   // ---- probes ------------------------------------------------------------
@@ -430,6 +467,22 @@ Item {
       root.vkOutput = vis ? vkOut : ""
       root.vkHeight = vis ? vkH : 0
       root.onVkState(vis ? "visible" : "hidden")
+    }
+  }
+
+  // `omarchy-shell lock status` is the lock plugin's own authoritative JSON
+  // and keeps answering IPC while the session is locked (the shell process IS
+  // the ext-session-lock client).
+  BoundedProcess {
+    id: lockProbe
+    command: ["omarchy-shell", "lock", "status"]
+    onStreamFinished: {
+      var locked = false
+      try {
+        var d = JSON.parse(output || "{}")
+        locked = !!(d && d.locked)
+      } catch (e) {}
+      root.onLockState(locked)
     }
   }
 
@@ -496,7 +549,10 @@ Item {
     running: true
     repeat: false
     triggeredOnStart: true
-    onTriggered: root.initRotation()
+    onTriggered: {
+      root.initRotation()
+      root.preStartVk()
+    }
   }
 
   Timer {
@@ -508,6 +564,7 @@ Item {
     onTriggered: {
       root.pollVoxtype()
       root.pollVk()
+      root.pollLock()
     }
   }
 
@@ -680,7 +737,7 @@ Item {
         screen: modelData
         readonly property bool vkHere: root.vkVisible
           && String(root.vkOutput) === String(modelData.name || "")
-        visible: root.voiceInputOpen || vkHere
+        visible: !root.locked && (root.voiceInputOpen || vkHere)
         color: "transparent"
         WlrLayershell.namespace: "maxt-tablet-dirpad"
         WlrLayershell.layer: WlrLayer.Top
@@ -826,6 +883,61 @@ Item {
     }
   }
 
+  // ------------------------------------------- lock-screen keyboard button
+  // A floating “keyboard” button on the LOCK screen, parked just right of the
+  // centred password field. It re-invokes the keyboard after the ▼ key folds
+  // it away; wvkbd itself is rendered above the lock by the above_lock rule.
+  Variants {
+    model: Quickshell.screens
+    delegate: Component {
+      PanelWindow {
+        id: lockVkButton
+        required property var modelData
+        screen: modelData
+        visible: root.locked
+        color: "transparent"
+        WlrLayershell.namespace: "maxt-tablet-vk-toggle"
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+        exclusionMode: ExclusionMode.Ignore
+
+        // Just right of the centred password field (381x67), on its centre line.
+        anchors { right: true; bottom: true }
+        margins {
+          right: Math.max(0, modelData.width / 2 - 190 - 36 - 64)
+          bottom: Math.max(0, modelData.height / 2 - 32)
+        }
+        implicitWidth: 64
+        implicitHeight: 64
+
+        Rectangle {
+          anchors.fill: parent
+          radius: 32
+          color: Util.alpha(Color.accent, 0.85)
+          border.width: 2
+          border.color: root.vkVisible ? Color.foreground : Util.alpha(Color.foreground, 0.6)
+
+          Text {
+            anchors.centerIn: parent
+            text: "\uF11C"        // fa-keyboard
+            color: "#ffffff"
+            font.family: Style.font.family
+            font.pixelSize: 26
+          }
+
+          TapHandler {
+            onTapped: {
+              // Pure invoke: always show (idempotent), never toggle into a
+              // stale-state double press. The ▼ key is the way to fold it.
+              root.lockVkShown = true
+              root.showVk()
+            }
+          }
+        }
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- IPC
 
   IpcHandler {
@@ -844,6 +956,8 @@ Item {
         rotationLabel: root.rotationLabel(root.rotation),
         autoOrient: root.autoOrient,
         orientation: root.orientation,
+        locked: root.locked,
+        lockVkShown: root.lockVkShown,
         version: root.pluginVersion
       })
     }

@@ -33,9 +33,16 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   scale** and keeps Hyprland's **touch calibration matrix** in step
   (`texp-rotate`), and the last angle is persisted across shell restarts.
 
+- **Lock screen** — the keyboard **auto-raises when the session locks** for
+  password entry (fingerprint stays available), rendered above the Omarchy
+  lock surface via `above_lock`. A floating **⌨** button right of the password
+  field re-invokes it after the keyboard's **▼** key folds it away, and it is
+  put back down on unlock. The keyboard is pre-started hidden at shell start
+  so raising it under the lock never has to connect a new Wayland client.
+
 Deliberately absent: laptop/tablet state machine, keyboard-auto-switch,
-handwriting, window management, bar decluttering, multi-touch gestures,
-lock/login-screen integration.
+handwriting, window management, bar decluttering, multi-touch gestures, SDDM
+greeter changes (the lock screen is supported).
 
 ## Requirements
 
@@ -87,6 +94,7 @@ and `wtype` are already installed. Every modified file gets a
 | Rotate 90° | `SUPER+SHIFT+R` · bar **⟳** left-click · `omarchy-shell maxt.tablet-lite rotationNext` |
 | Sensor auto-rotate | bar **⟳** right-click · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
 | Set an exact angle | `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
+| Lock screen keyboard | raises automatically on lock; floating **⌨** button right of the password field; **▼** folds it |
 | Open/close voice input | bar **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |
 | Dictate | press & hold the big mic, release to transcribe |
 | Fix the text | **Delete** (BackSpace) / **Clear** (select-all+delete; readline `Ctrl+A`+`Ctrl+K` in terminals) / **Enter** |

@@ -29,8 +29,13 @@
   **保留当前缩放**并同步 Hyprland 的**触摸校准矩阵**（`texp-rotate`），
   最后一个角度会持久化，shell 重启不会悄悄转回横屏。
 
+- **锁屏键盘** —— 锁屏时**自动升起键盘**用于输入密码（指纹仍然可用），
+  通过 `above_lock` 渲染在 Omarchy 锁屏界面之上。密码框右侧有一个浮动 **⌨**
+  按钮，键盘被 **▼** 收起后可再次调出；解锁时自动放下。shell 启动时会预启动
+  键盘并隐藏，锁屏下升起时不需要在已锁定的会话里新建 Wayland 客户端。
+
 有意去掉：笔记本/平板状态机、键盘自动切换、手写、窗口管理、状态栏精简、
-多点触控手势、锁屏/登录屏集成。
+多点触控手势、SDDM 登录界面改动（锁屏已支持）。
 
 ## 依赖
 
@@ -81,6 +86,7 @@ omarchy plugin add https://github.com/gmaxxxie/omarchy-tablet-experience-lite.gi
 | 旋转 90° | `SUPER+SHIFT+R` · 状态栏 **⟳** 左键 · `omarchy-shell maxt.tablet-lite rotationNext` |
 | 传感器自动旋转 | 状态栏 **⟳** 右键 · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
 | 指定角度 | `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
+| 锁屏键盘 | 锁屏自动升起；密码框右侧浮动 **⌨** 按钮可重调；**▼** 收起 |
 | 开/关语音浮层 | 状态栏 **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |
 | 说话输入 | 按住大麦克风，松开转写 |
 | 修正文本 | **Delete**（退格）/ **Clear**（全选删除；终端里是 readline `Ctrl+A`+`Ctrl+K`）/ **Enter** |
