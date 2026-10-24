@@ -75,6 +75,12 @@ for src in "$REPO_ROOT"/scripts/texp-*; do
   remove_if_same "$BIN_DIR/$(basename "$src")" "$src" "helper script"
 done
 
+# ------------------------------------------------ data files
+LITE_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/tablet-lite"
+remove_if_same "$LITE_DATA/wvkbd-hide-key.patch" \
+  "$REPO_ROOT/config/wvkbd/wvkbd-hide-key.patch" "wvkbd hide-key patch"
+[ -d "$LITE_DATA" ] && run rmdir --ignore-fail-on-non-empty "$LITE_DATA"
+
 # ------------------------------------------------ user-local wvkbd build
 # A build artifact (not byte-comparable). Remove it only when it is the lite
 # build: ▼ present, no full-plugin 手写/texp-ink-key hook.

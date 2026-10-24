@@ -27,7 +27,14 @@ WVKBD_SHA256="330e7d41e2ccf3f984af701c0d055d919cff66710dfe05ce9d77e4ae6e1adc16"
 MAX_ARCHIVE_BYTES=8388608
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PATCH="$REPO_ROOT/config/wvkbd/wvkbd-hide-key.patch"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/tablet-lite"
+# The installed helper lives in ~/.local/bin and cannot see the repo; install.sh
+# copies the patch to DATA_DIR. A dev run from the repo falls back to the
+# sibling config/ directory.
+PATCH="$DATA_DIR/wvkbd-hide-key.patch"
+if [ ! -f "$PATCH" ]; then
+  PATCH="$REPO_ROOT/config/wvkbd/wvkbd-hide-key.patch"
+fi
 BIN="${BIN_DIR:-$HOME/.local/bin}"
 DEST="$BIN/wvkbd-deskintl"
 DRY_RUN=0

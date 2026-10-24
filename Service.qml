@@ -36,7 +36,7 @@ Item {
   Component.onCompleted: console.log("tablet-lite Service LOADED v" + root.pluginVersion)
 
   property var shell: null
-  readonly property string pluginVersion: "1.0.1"
+  readonly property string pluginVersion: "1.0.2"
 
   // Voice input (voxtype hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing

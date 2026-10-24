@@ -1,34 +1,31 @@
 #!/usr/bin/env python3
 """
-texp-vk — virtual keyboard helper for the tablet experience.
+texp-vk — virtual keyboard helper for Tablet Lite.
 
 Subcommands:
   daemon   Watch the Wacom touchscreen; a one-finger swipe starting in the
            bottom strip and moving upward shows the keyboard; a downward drag
            in the keyboard area (while visible) dismisses it. Left/right edge
            swipes are untouched (Hyprland workspace swipe owns those).
-           NOTE (v1.2.1): the daemon is NOT autostarted by default — the
-           swipe gesture was disabled on request; `texp-vk toggle` (SUPER+U,
-           bar button, 3-finger tap) needs no daemon. Re-enable by adding
+           NOTE: the lite install does NOT autostart the daemon — SUPER+U and
+           the bar button need no daemon. Re-enable it by adding
            `o.launch_on_start("texp-vk daemon")` to autostart.lua.
-  toggle   Show/hide the on-screen keyboard now (used by Super+U / bar
-           button / 3-finger tap). The keyboard is started on demand.
+  toggle   Show/hide the on-screen keyboard now (SUPER+U / bar button). The
+           keyboard is started on demand.
   show     Show the keyboard now (start on demand if needed).
   hide     Hide the keyboard (used by the voice-input <-> keyboard
            exclusivity in Service.qml).
-  start-hidden  Start the keyboard backend WITHOUT changing its visibility
-           (used on tablet entry so the lock screen can show it by signal
-           later — no new Wayland client has to connect while the session
-           is already locked).
+  start-hidden  Start the keyboard backend WITHOUT changing its visibility.
   debug    (hidden) log every touch decision to stderr for diagnostics.
 
-Keyboard backend (v1.12): primary is **wvkbd-deskintl** — wlroots-native,
-with Ctrl / Super / Alt / Shift / AltGr, F1-F12, a full number row (Chinese
-candidate selection) and arrows, sized for the tablet. squeekboard is used
-as a fallback when wvkbd-deskintl is not installed. Visibility is mirrored
-to $XDG_STATE_HOME/texp-vk/visible so the shell (BarWidget / Service.qml)
-can highlight the bar icon and enforce voice-input <-> keyboard exclusivity
-without D-Bus introspection.
+Keyboard backend: primary is **wvkbd-deskintl** — wlroots-native, with
+Ctrl / Super / Alt / Shift / AltGr, F1-F12, a full number row (Chinese
+candidate selection) and arrows. The lite build (installed by
+`texp-install-wvkbd` into ~/.local/bin) also carries a ▼ collapse key and is
+preferred over a PATH copy. squeekboard is the fallback when wvkbd-deskintl
+is not installed. Visibility is read back from `hyprctl layers` (a mapped
+wvkbd layer), so a ▼-key collapse is reflected immediately; the
+$XDG_STATE_HOME/texp-vk/visible file remains only as a fallback mirror.
 
 Note: the device is opened without grab(); events are only observed, never
 consumed, so Hyprland still receives every touch.

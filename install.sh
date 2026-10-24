@@ -167,6 +167,13 @@ for src in "$REPO_ROOT"/scripts/texp-*; do
   run install -m 0755 "$src" "$BIN_DIR/$name"
 done
 
+# ------------------------------------------------------------- data files
+# The installed texp-install-wvkbd is in ~/.local/bin and cannot see the repo;
+# keep the patch it applies in a stable data directory.
+LITE_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/tablet-lite"
+run mkdir -p "$LITE_DATA"
+run install -m 0644 "$REPO_ROOT/config/wvkbd/wvkbd-hide-key.patch" "$LITE_DATA/wvkbd-hide-key.patch"
+
 # ------------------------------------------------------------- wvkbd build
 if [ "$BUILD_WVKBD" -eq 1 ]; then
   if [ -x "$BIN_DIR/texp-install-wvkbd" ]; then
