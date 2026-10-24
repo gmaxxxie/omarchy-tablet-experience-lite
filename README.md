@@ -28,11 +28,12 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   hold-to-talk overlay, where there is no keyboard. With the keyboard up they
   are hidden: the keyboard itself already carries Esc / Tab / Ctrl / arrows.
 - **Rotation** — the bar **⟳** button and **`SUPER+SHIFT+R`** step the display
-  through 0° / 90° / 180° / 270°. Left-click the icon = next 90°; right-click
-  toggles **sensor-following auto-rotate** (`texp-orient`, sysfs accelerometer,
-  calibrated for the ThinkPad X12). Every rotation **preserves the monitor
-  scale** and keeps Hyprland's **touch calibration matrix** in step
-  (`texp-rotate`), and the last angle is persisted across shell restarts.
+  through 0° / 90° / 180° / 270°. The separate **🧭** button toggles
+  **sensor-following auto-rotate** (`texp-orient`, sysfs accelerometer,
+  calibrated for the ThinkPad X12) and highlights while it is on. Every
+  rotation **preserves the monitor scale** and keeps Hyprland's **touch
+  calibration matrix** in step (`texp-rotate`), and the last angle is persisted
+  across shell restarts.
 
 - **Lock screen** — the keyboard **auto-raises when the session locks** for
   password entry (fingerprint stays available), rendered above the Omarchy
@@ -92,8 +93,8 @@ and `wtype` are already installed. Every modified file gets a
 |---|---|
 | Toggle virtual keyboard | `SUPER+U` · bar **⌨** · `omarchy-shell maxt.tablet-lite keyboardToggle` |
 | Fold the keyboard away | its **▼** key |
-| Rotate 90° | `SUPER+SHIFT+R` · bar **⟳** left-click · `omarchy-shell maxt.tablet-lite rotationNext` |
-| Sensor auto-rotate | bar **⟳** right-click · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
+| Rotate 90° | `SUPER+SHIFT+R` · bar **⟳** · `omarchy-shell maxt.tablet-lite rotationNext` |
+| Sensor auto-rotate | bar **🧭** · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
 | Set an exact angle | `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
 | Lock screen keyboard | raises automatically on lock; floating **⌨** button right of the password field; **▼** folds it |
 | Open/close voice input | bar **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |

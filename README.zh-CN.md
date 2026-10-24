@@ -25,10 +25,10 @@
   自动隐藏，因为键盘本身已经有 Esc / Tab / Ctrl / 方向键，不再遮住键盘上方的
   内容。
 - **屏幕旋转** —— 状态栏 **⟳** 按钮和 **`SUPER+SHIFT+R`** 在 0° / 90° /
-  180° / 270° 之间旋转。左键点图标 = 下一个 90°，右键 = 开关**传感器自动旋转**
-  （`texp-orient` 读 sysfs 加速度计，按 ThinkPad X12 校准）。每次旋转都会
-  **保留当前缩放**并同步 Hyprland 的**触摸校准矩阵**（`texp-rotate`），
-  最后一个角度会持久化，shell 重启不会悄悄转回横屏。
+  180° / 270° 之间旋转。旁边的 **🧭** 按钮开关**传感器自动旋转**
+  （`texp-orient` 读 sysfs 加速度计，按 ThinkPad X12 校准），开启时高亮。
+  每次旋转都会**保留当前缩放**并同步 Hyprland 的**触摸校准矩阵**
+  （`texp-rotate`），最后一个角度会持久化，shell 重启不会悄悄转回横屏。
 
 - **锁屏键盘** —— 锁屏时**自动升起键盘**用于输入密码（指纹仍然可用），
   通过 `above_lock` 渲染在 Omarchy 锁屏界面之上。密码框右侧有一个浮动 **⌨**
@@ -84,8 +84,8 @@ omarchy plugin add https://github.com/gmaxxxie/omarchy-tablet-experience-lite.gi
 |---|---|
 | 开关虚拟键盘 | `SUPER+U` · 状态栏 **⌨** · `omarchy-shell maxt.tablet-lite keyboardToggle` |
 | 收起键盘 | 键盘上的 **▼** 键 |
-| 旋转 90° | `SUPER+SHIFT+R` · 状态栏 **⟳** 左键 · `omarchy-shell maxt.tablet-lite rotationNext` |
-| 传感器自动旋转 | 状态栏 **⟳** 右键 · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
+| 旋转 90° | `SUPER+SHIFT+R` · 状态栏 **⟳** · `omarchy-shell maxt.tablet-lite rotationNext` |
+| 传感器自动旋转 | 状态栏 **🧭** · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
 | 指定角度 | `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
 | 锁屏键盘 | 锁屏自动升起；密码框右侧浮动 **⌨** 按钮可重调；**▼** 收起 |
 | 开/关语音浮层 | 状态栏 **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |

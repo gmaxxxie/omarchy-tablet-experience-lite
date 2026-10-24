@@ -263,8 +263,8 @@ Done.
              omarchy-shell maxt.tablet-lite keyboardToggle
   Voice    : the bar 🎤 button (press & hold the big mic), or
              omarchy-shell maxt.tablet-lite voiceInputToggle
-  Rotation : SUPER+SHIFT+R, or the bar ⟳ button (click = next 90°,
-             right-click = sensor auto-rotate on/off)
+  Rotation : SUPER+SHIFT+R, or the bar ⟳ button (next 90°)
+  Auto     : the bar 🧭 button (sensor-following on/off)
   Lock     : the keyboard auto-raises on lock; the floating ⌨ button right
              of the password field re-invokes it after ▼ folds it away
 
