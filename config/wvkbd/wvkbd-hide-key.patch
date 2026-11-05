@@ -1,7 +1,4 @@
-# wvkbd tablet key — the ▼ collapse key (fold the on-screen keyboard away).
-# A touch affordance wvkbd does not ship; the lite variant deliberately has
-# no handwriting entry (this plugin is voice + keyboard only).
---- wvkbd-v0.20/keyboard.h
+--- wvkbd-v0.21/keyboard.h
 +++ wvkbd-build/keyboard.h
 @@ -19,6 +19,9 @@
  	Copy,    // Copy key, copies the unicode value specified in code (creates and
@@ -13,17 +10,18 @@
  	Layout,  // Layout switch to a specific layout
  	BackLayer, // Layout switch to the layout that was previously active
  	NextLayer, // Layout switch to the next layout in the layers sequence
---- wvkbd-v0.20/keyboard.c
+--- wvkbd-v0.21/keyboard.c
 +++ wvkbd-build/keyboard.c
-@@ -5,5 +5,7 @@
+@@ -6,6 +6,8 @@
  #include <ctype.h>
+ #include <time.h>
  #include "keyboard.h"
 +/* Folding the keyboard away (the "▼" collapse key) is implemented in main.c. */
 +extern void hide_keyboard(void);
- #include "drw.h"
- #include "os-compatibility.h"
+ #include <linux/input-event-codes.h>
  
-@@ -511,6 +514,11 @@
+ #include "drw.h"
+@@ -524,6 +526,11 @@
                      //"first layer" with other modifiers)
          kbd_next_layer(kb, k, false);
          break;
@@ -35,9 +33,9 @@
      case BackLayer: // triggered when "Abc" keys are pressed
          // switch to the last active alphabetical layout
          if (kb->last_abc_layout) {
---- wvkbd-v0.20/main.c
+--- wvkbd-v0.21/main.c
 +++ wvkbd-build/main.c
-@@ -808,6 +808,12 @@
+@@ -850,6 +850,12 @@
  }
  
  void
@@ -50,7 +48,7 @@
  pipewarn()
  {
      fprintf(stderr, "wvkbd: cannot pipe data out.\n");
---- wvkbd-v0.20/layout.deskintl.h
+--- wvkbd-v0.21/layout.deskintl.h
 +++ wvkbd-build/layout.deskintl.h
 @@ -235,6 +235,7 @@
    {"←", "←", 1.0, Code, KEY_LEFT, .scheme = 1},

@@ -95,11 +95,11 @@ if [ "$VERIFY" -eq 1 ]; then
     if [ -x "$BIN_DIR/$s" ]; then ok "helper $BIN_DIR/$s"; else bad "helper missing: $BIN_DIR/$s"; fail=1; fi
   done
 
-  if [ -x "$HOME/.local/bin/wvkbd-deskintl" ] \
-      && grep -q $'\xE2\x96\xBC' "$HOME/.local/bin/wvkbd-deskintl" 2>/dev/null; then
-    ok "wvkbd-deskintl lite build with ▼ ($HOME/.local/bin/wvkbd-deskintl)"
-  elif command -v wvkbd-deskintl >/dev/null 2>&1; then
-    warn "wvkbd-deskintl present but without the lite ▼ build — run $BIN_DIR/tlit-install-wvkbd"
+  vk_check="$("$BIN_DIR/tlit-install-wvkbd" --check 2>/dev/null)"
+  if [ -n "$vk_check" ]; then
+    ok "keyboard: $vk_check"
+  elif [ -e "$BIN_DIR/wvkbd-deskintl" ] || command -v wvkbd-deskintl >/dev/null 2>&1; then
+    warn "wvkbd-deskintl present but not the pinned lite build — run $BIN_DIR/tlit-install-wvkbd"
   else
     bad "wvkbd-deskintl is not installed — run $BIN_DIR/tlit-install-wvkbd"; fail=1
   fi

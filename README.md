@@ -131,7 +131,7 @@ IPC: `getState` · `voiceInputToggle|Show|Hide` · `keyboardToggle|Show|Hide` ·
 Service.qml             QML service: voice overlay, caret/CLI pad, VK state
 BarWidget.qml           bar buttons: ⌨ keyboard + 🎤 voice
 scripts/tlit-vk         keyboard toggle/show/hide (wvkbd only)
-scripts/tlit-install-wvkbd  user-local wvkbd-deskintl build (pinned + SHA-256)
+scripts/tlit-install-wvkbd  user-local wvkbd-deskintl build (pinned v0.21 + SHA-256)
 scripts/tlit-rotate     rotate display + touch matrix, preserve scale
 scripts/tlit-orient     IIO accelerometer posture probe (auto-rotate)
 scripts/tlit-vtext      voxtype post-processing (technical-term table)

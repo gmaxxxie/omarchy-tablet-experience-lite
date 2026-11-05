@@ -53,7 +53,7 @@ Item {
   }
 
   property var shell: null
-  readonly property string pluginVersion: "1.6.0"
+  readonly property string pluginVersion: "1.7.0"
 
   // Voice input (hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing
