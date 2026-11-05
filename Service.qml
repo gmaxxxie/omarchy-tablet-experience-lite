@@ -334,8 +334,9 @@ Item {
     return true
   }
 
-  // One 90° step from the CURRENT transform: `next` counter-clockwise,
-  // `prev` clockwise (same convention as the full plugin).
+  // One 90° step from the CURRENT transform. `next` adds 1 (the content turns
+  // clockwise, which is what you want when turning the device to the left);
+  // `prev` subtracts 1. The picker's ⟳ calls next and ⟲ calls prev.
   function rotateStep(dir) {
     if (rotateCmd.running) return
     root.setPref("auto", "off")
