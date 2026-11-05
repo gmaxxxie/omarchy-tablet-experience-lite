@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "maxt.mousehop",
+  "name": "Mousehop KVM",
+  "version": "1.0.0",
+  "author": "maxt",
+  "license": "MIT",
+  "description": "Shows whether the mousehop software-KVM client is armed, and toggles it on click. ON = pushing the pointer into the peer's edge captures the pointer and keyboard and hands them to the other machine; OFF = mousehop never takes an InputCapture session, so the pointer and every key stay local. Same action as SUPER+SHIFT+K (tlit-mousehop-toggle toggle).",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Mousehop KVM",
+    "description": "mousehop on/off — is the pointer/keyboard armed to cross to the peer machine? Click to toggle (SUPER+SHIFT+K)",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

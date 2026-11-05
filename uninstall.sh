@@ -8,6 +8,8 @@
 #   - packages are not touched (nothing was installed: the keyboard is a
 #     user-local build, dictation belongs to Omarchy)
 #   - the user's voxtype replacement table is user data — left in place
+#   - the folio touchpad rescue (helper + unit + udev rule) is the only system
+#     state; it is removed with sudo under the same byte-match rule
 #
 # Usage:
 #   ./uninstall.sh             undo install.sh changes
@@ -18,6 +20,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 HYPR_DIR="${HYPR_DIR:-$HOME/.config/hypr}"
+PLUGIN_DIR="${PLUGIN_DIR:-$HOME/.config/omarchy/plugins}"
+SYSTEM_BIN="${SYSTEM_BIN:-/usr/local/bin}"
+UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
+UDEV_DIR="${UDEV_DIR:-/etc/udev/rules.d}"
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
@@ -35,6 +41,17 @@ remove_if_same() { # $1 path $2 repo copy $3 label
   fi
 }
 
+# Same rule for the system files install.sh copies with sudo.
+remove_if_same_root() { # $1 path $2 repo copy $3 label
+  local file="$1" repo="$2" label="$3"
+  [ -e "$file" ] || return 0
+  if cmp -s "$file" "$repo"; then
+    run sudo rm -f "$file"; log "removed $label: $file"; system_changed=1
+  else
+    warn "$label differs from the repo copy — left in place: $file"
+  fi
+}
+
 [ "$DRY_RUN" -eq 1 ] && log "DRY RUN — nothing will be changed"
 
 # ------------------------------------------------ hyprland hooks
@@ -44,9 +61,29 @@ for f in "$HYPR_DIR/hyprland.lua" "$HYPR_DIR/autostart.lua"; do
     run sed -i '\|require("hypr.tablet-lite")|d' "$f"
     log "removed from $f: require(\"hypr.tablet-lite\")"
   fi
+  if grep -qF 'require("hypr.mousehop")' "$f"; then
+    run sed -i '\|require("hypr.mousehop")|d' "$f"
+    log "removed from $f: require(\"hypr.mousehop\")"
+  fi
 done
 remove_if_same "$HYPR_DIR/tablet-lite.lua" \
   "$REPO_ROOT/config/hypr/tablet-lite.lua" "hypr config"
+remove_if_same "$HYPR_DIR/mousehop.lua" \
+  "$REPO_ROOT/config/hypr/mousehop.lua" "hypr config (mousehop)"
+
+# ------------------------------------------------ mousehop bar widget
+# Its own plugin folder: removing it must not touch maxt.tablet-lite.
+MH_DST="$PLUGIN_DIR/maxt.mousehop"
+if command -v omarchy >/dev/null 2>&1 \
+    && omarchy plugin list 2>/dev/null | grep -qE '^maxt\.mousehop[[:space:]]+enabled'; then
+  run omarchy plugin disable maxt.mousehop >/dev/null 2>&1 \
+    && log "mousehop widget disabled on the bar" \
+    || warn "could not disable maxt.mousehop — run: omarchy plugin disable maxt.mousehop"
+fi
+for f in manifest.json BarWidget.qml README.md; do
+  remove_if_same "$MH_DST/$f" "$REPO_ROOT/mousehop/$f" "mousehop widget file"
+done
+[ -d "$MH_DST" ] && run rmdir --ignore-fail-on-non-empty "$MH_DST"
 
 # ------------------------------------------------ voxtype wiring
 if command -v voxtype >/dev/null 2>&1; then
@@ -75,6 +112,25 @@ for src in "$REPO_ROOT"/scripts/tlit-*; do
   [ -f "$src" ] || continue
   remove_if_same "$BIN_DIR/$(basename "$src")" "$src" "helper script"
 done
+
+# ------------------------------------------------ folio touchpad rescue
+# The only system-side install: helper in /usr/local/bin, one systemd unit, one
+# udev rule. Removed with sudo, and still only when they byte-match the repo.
+if [ -e "$UNIT_DIR/tlit-folio-touchpad.service" ] \
+    || [ -e "$SYSTEM_BIN/tlit-folio-touchpad" ]; then
+  run sudo systemctl stop tlit-folio-touchpad.service 2>/dev/null || true
+fi
+system_changed=0
+remove_if_same_root "$SYSTEM_BIN/tlit-folio-touchpad" \
+  "$REPO_ROOT/scripts/tlit-folio-touchpad" "touchpad rescue helper"
+remove_if_same_root "$UNIT_DIR/tlit-folio-touchpad.service" \
+  "$REPO_ROOT/config/systemd/tlit-folio-touchpad.service" "touchpad rescue unit"
+remove_if_same_root "$UDEV_DIR/99-tlit-folio-touchpad.rules" \
+  "$REPO_ROOT/config/udev/99-tlit-folio-touchpad.rules" "touchpad rescue udev rule"
+if [ "$system_changed" -eq 1 ]; then
+  run sudo systemctl daemon-reload
+  run sudo udevadm control --reload-rules
+fi
 
 # ------------------------------------------------ data files
 LITE_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/tablet-lite"
@@ -106,6 +162,12 @@ Kept on purpose:
 Helpers are installed as tlit-*; the pre-1.5 texp-* copies are no longer used.
 If this machine still carries them, delete them with the full plugin's installer.
 
+The folio touchpad rescue (systemd unit + udev rule + /usr/local/bin helper) is
+gone too. The keyboard keeps working, but detaching and re-attaching the folio
+can leave the touchpad without tap / clickpad press / 2- and 3-finger gestures
+until the next reboot.
+
 Remove the plugin itself:
   omarchy plugin remove maxt.tablet-lite
+  omarchy plugin remove maxt.mousehop
 EOF

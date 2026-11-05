@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "maxt.tablet-lite",
   "name": "Tablet Lite",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "author": "maxt",
   "license": "MIT",
-  "description": "The tablet core: the on-screen keyboard (wvkbd-deskintl with a visible ▼ collapse key, also on the lock screen), a hold-to-talk pad for Omarchy's own dictation (omarchy dictation start|stop) with Delete/Clear/Enter, caret arrows and a CLI-keys grid for touch-only editing, and screen rotation — auto (sensor) by default plus fixed 0°/90°/180°/270°, with the touch calibration matrix kept in step. Everything Omarchy 4.5 already provides (dictation backends and their lock, the OSD, the theme colors, the lock state) is used as-is instead of being re-implemented.",
+  "description": "The tablet core: the on-screen keyboard (wvkbd-deskintl with a visible ▼ collapse key, also on the lock screen), a hold-to-talk pad for Omarchy's own dictation (omarchy dictation start|stop) with Delete/Clear/Enter, caret arrows and a CLI-keys grid for touch-only editing, and screen rotation — auto (sensor) by default plus fixed 0°/90°/180°/270°, with the touch calibration matrix kept in step. Everything Omarchy 4.5 already provides (dictation backends and their lock, the OSD, the theme colors, the lock state) is used as-is instead of being re-implemented. It also ships maxt.mousehop, a separate one-button bar switch for the mousehop software KVM: it shows whether the pointer and keyboard are armed to cross to the peer machine, and toggles that in one click (SUPER+SHIFT+K), because an active InputCapture session silently drops every local pointer and key event.",
   "kinds": [
     "service",
     "bar-widget"

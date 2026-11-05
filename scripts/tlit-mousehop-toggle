@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""
+tlit-mousehop-toggle — flip a mousehop KVM client on / off from a keybinding.
+
+ON  = the client is active again: pushing the pointer into its edge captures
+      it and hands the pointer + keyboard to the peer machine.
+OFF = the client is deactivated, so mousehop never takes an InputCapture
+      session. The pointer stays local and no key can leak to the peer.
+
+Why this exists: while a capture is live, Hyprland forwards every pointer and
+key event to the peer and drops it locally (see tlit-mousehop's notes). On this
+tablet that looks like "the touchpad stopped working" / "the cursor vanished",
+and the auto-release loop pins the cursor on the edge column (x = -2, 0, 1, 5)
+so the next tiny movement captures again. `off` releases the capture before it
+deactivates the client, so the pointer is usable the moment the toggle lands.
+
+Usage:
+  tlit-mousehop-toggle            # toggle (default)
+  tlit-mousehop-toggle on
+  tlit-mousehop-toggle off
+  tlit-mousehop-toggle status
+  tlit-mousehop-toggle -v on      # verbose (stderr)
+
+Exit status: 0 when the requested state was reached (or there was nothing to
+do), 1 otherwise. It is bound to a key, so it must never raise.
+"""
+import os
+import re
+import subprocess
+import sys
+
+MOUSEHOP = "mousehop"
+CLI_TIMEOUT = 3.0
+VERBOSE = os.environ.get("TEXP_MOUSEHOP_DEBUG") == "1"
+
+# "id 0: max-mac-mini-4:4252 (left) active: true, ips: {…}"
+CLIENT_RE = re.compile(
+    r"^id\s+(\d+):\s+(\S+)\s+\(([^)]+)\)\s+active:\s+(true|false)")
+
+
+def log(msg):
+    if VERBOSE:
+        sys.stderr.write("tlit-mousehop-toggle: %s\n" % msg)
+
+
+def run(argv):
+    """Run a command, returning (returncode, stdout+stderr)."""
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=CLI_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 127, str(exc)
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def clients():
+    """Configured mousehop clients: [(id, host, edge, active), …]."""
+    rc, out = run([MOUSEHOP, "cli", "list"])
+    if rc != 0:
+        log("cli list failed (%d): %s" % (rc, out.strip()))
+        return []
+    found = []
+    for line in out.splitlines():
+        match = CLIENT_RE.match(line.strip())
+        if match:
+            found.append((int(match.group(1)), match.group(2),
+                          match.group(3), match.group(4) == "true"))
+    log("clients: %s" % (found,))
+    return found
+
+
+def release_capture():
+    """Drop any live InputCapture session (tlit-mousehop is a no-op without)."""
+    for argv in (["tlit-mousehop", "release"],):
+        rc, out = run(argv)
+        if rc == 127:                     # not installed: nothing to do
+            log("tlit-mousehop missing, skipping release")
+            return
+        log("release rc=%d %s" % (rc, out.strip()[:120]))
+
+
+def notify(summary, body):
+    """Desktop notification; failure here must not fail the toggle."""
+    for argv in (["notify-send", "-a", "mousehop", "-i", "input-mouse",
+                  summary, body],):
+        rc, out = run(argv)
+        if rc != 0:
+            log("notify-send failed: %s" % out.strip()[:120])
+        return
+
+
+def set_state(active):
+    """Activate or deactivate every configured client."""
+    rows = clients()
+    if not rows:
+        notify("mousehop: no client",
+               "Check that the mousehop daemon is running.")
+        return 1
+    verb = "activate" if active else "deactivate"
+    if not active:
+        # Release first: deactivating while captured can leave the pointer
+        # stuck on the edge column.
+        release_capture()
+    failed = []
+    for handle, host, edge, _ in rows:
+        rc, out = run([MOUSEHOP, "cli", verb, str(handle)])
+        log("%s %d -> rc=%d %s" % (verb, handle, rc, out.strip()[:120]))
+        if rc != 0:
+            failed.append(host)
+    if failed:
+        notify("mousehop: %s failed" % verb,
+               "Could not %s: %s" % (verb, ", ".join(failed)))
+        return 1
+    host, edge = rows[0][1], rows[0][2]
+    if active:
+        notify("mousehop: 开",
+               "推指针到 %s 边缘 → 跨到 %s" % (edge, host.split(":")[0]))
+    else:
+        notify("mousehop: 关", "指针和键盘全部留在本机（不抓取）")
+    return 0
+
+
+def status():
+    rows = clients()
+    if not rows:
+        print("mousehop: no client (daemon down?)")
+        return 1
+    for handle, host, edge, active in rows:
+        print("mousehop %d: %s (%s) — %s" % (
+            handle, host, edge, "ON" if active else "OFF"))
+    return 0
+
+
+def main():
+    global VERBOSE
+    command = "toggle"
+    for arg in sys.argv[1:]:
+        if arg in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        if arg in ("-v", "--verbose"):
+            VERBOSE = True
+        elif arg in ("on", "off", "toggle", "status"):
+            command = arg
+        else:
+            sys.stderr.write("tlit-mousehop-toggle: unknown argument '%s'\n" % arg)
+            return 2
+    try:
+        if command == "status":
+            return status()
+        rows = clients()
+        if not rows:
+            notify("mousehop: 无客户端", "daemon 没在跑，或者还没配客户端。")
+            return 1
+        any_active = any(active for _, _, _, active in rows)
+        if command == "toggle":
+            target = not any_active
+        else:
+            target = command == "on"
+        log("active=%s → target=%s" % (any_active, target))
+        return set_state(target)
+    except Exception as exc:              # a keybinding must never raise
+        notify("mousehop: 出错", str(exc))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

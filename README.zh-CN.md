@@ -51,6 +51,21 @@
   横屏仍保留一键直达的三个图标。这样竖屏窄状态栏里图标不会
   再和时钟挤在一起。
 
+- **Mousehop KVM 开关**（单独的状态栏组件 `maxt.mousehop`，装在本插件
+  **旁边**而不是里面）—— 显示软件 KVM 客户端现在有没有「武装」，一下点掉/点开。
+  开 = 指针一推到对端边缘，指针和键盘就交给对端（InputCapture 会话，期间本地
+  输入全部丢失）；关 = 完全不抓取。和 `SUPER+SHIFT+K` 同一个动作。
+
+- **Folio 触控板抢救** —— X12 Detachable 的键盘（Darfon `17ef:60fe`）把一个
+  HID 接口上的两样东西分得很开：真正的触控板（`BTN_TOOL_FINGER` / 
+  `DOUBLETAP` / `TRIPLETAP`、`ABS_MT_SLOT`、`ABS_MT_TRACKING_ID`）和一套传统的
+  相对「鼠标」通道。把键盘拆下来再吸回去，USB 会重新枚举，`hid-multitouch`
+  有时候回来时多点触控报告通道是死的：光标还能动、还能点，但 **tap、按压、
+  双指和三指手势全部静默失效**，而且 libinput 连一条 `ABS_MT` 事件都收不到——
+  所以 Hyprland 和触控板设置本身都没错，只有重绑驱动能救。`tlit-folio-touchpad`
+  就做这件事，一条 udev 规则加一个 oneshot 服务会让它在键盘出现两秒后自动跑，
+  拆装键盘自己就好了。手动：`sudo tlit-folio-touchpad`。
+
 有意去掉：笔记本/平板状态机、键盘自动切换、手写、窗口管理、状态栏精简、
 多点触控手势（底部上滑调键盘的守护进程已删——▼ 键、`SUPER+U` 和状态栏
 按钮已经够用）、SDDM 登录界面改动（锁屏已支持）。
@@ -69,6 +84,8 @@ Esc / Tab / Ctrl / 方向键，但那些键是为了「收起键盘只靠听写�
   不需要额外的守护进程）。
 - 编译 wvkbd 需要 `cairo pango wayland libxkbcommon`（多数 Omarchy 装机已有）。
 - 有触摸屏最好，但没有任何硬件绑定：键鼠同样能用。
+- 唯一与硬件绑定的只有 Folio 触控板抢救：它只匹配 X12 Detachable Gen 1 的
+  键盘（`17ef:60fe`），其他机器上永远不会触发。
 
 ## 安装
 
@@ -90,11 +107,14 @@ omarchy plugin add https://github.com/gmaxxxie/omarchy-tablet-experience-lite.gi
 |---|---|
 | *(无)* | helper + wvkbd 构建 + `SUPER+U` 钩子 + voxtype 接线 |
 | `--no-packages` | 不调用 pacman（`wtype`） |
+| `--no-system` | 不装 Folio 触控板抢救（不用 sudo，全部写入都在 `$HOME` 内） |
 | `--no-wvkbd` | 跳过构建（构建完成前键盘不可用） |
 | `--dry-run` | 只预览，不改任何东西 |
 | `--verify` | 安装后只读自检 |
 
-所有写入都在 `$HOME` 内，只有装 `wtype` 那一步需要 sudo。
+除 Folio 触控板抢救（helper 在 `/usr/local/bin`、一个 systemd 服务、一条
+udev 规则；`--no-system` 可跳过）之外，所有写入都在 `$HOME` 内；只有它和装
+`wtype` 那一步需要 sudo。
 每个被修改的文件都会先备份成 `*.bak.<时间戳>`。
 
 **重载一次 shell**（或重新登录）让插件重新加载，然后运行
@@ -116,6 +136,8 @@ omarchy plugin add https://github.com/gmaxxxie/omarchy-tablet-experience-lite.gi
 | 修正文本 | **Delete**（退格）/ **Clear**（全选删除；终端里是 readline `Ctrl+A`+`Ctrl+K`）/ **Enter** |
 | 移动光标 | 左侧 **← → ↑ ↓** |
 | Agent 按键（pi / codex） | **CLI keys ▲** → `esc` `/` `tab` `⇧tab` `⌃C` `⌃D` `⌃J` `⌃T` |
+| mousehop KVM 开/关 | 状态栏 **⇄**（红色=已开）· `SUPER+SHIFT+K` · `tlit-mousehop-toggle on|off|toggle|status` |
+| 拆装键盘后触控板失灵 | 自动（udev 规则 → `tlit-folio-touchpad`）· 手动：`sudo tlit-folio-touchpad` |
 
 IPC：`getState` · `voiceInputToggle|Show|Hide` ·
 `keyboardToggle|Show|Hide` · `cliKeysToggle` · `clearNow` ·
@@ -127,13 +149,20 @@ IPC：`getState` · `voiceInputToggle|Show|Hide` ·
 ```sh
 ~/.config/omarchy/plugins/maxt.tablet-lite/uninstall.sh
 omarchy plugin remove maxt.tablet-lite
+omarchy plugin remove maxt.mousehop
 ```
 
 helper 都以 `tlit-*` 装进 `~/.local/bin`，刻意与 full 插件的 `texp-*` 分开：
 两个插件可以并存，不会互相覆盖对方的键盘 helper。
 
+`tlit-folio-touchpad` 是例外：udev 和 systemd 以 root 运行它，所以它和它的服务、
+udev 规则一起装在 `/usr/local/bin` / `/etc`，`uninstall.sh` 会用 sudo 把它们删掉
+（依旧只在字节完全一致时才删）。删掉后键盘照用，但拆装键盘可能让触控板失去
+tap / 按压 / 双指三指手势，直到下次重启。
+
 其中 `mousehop`、`rotate`、`vtext` 与 full 插件的 `texp-*` 是**同一份程序**
-（只有前缀不同），`vk`、`orient`、`install-wvkbd`、`state` 是 lite 独有。
+（只有前缀不同），`vk`、`orient`、`install-wvkbd`、`state`、`mousehop-toggle`
+是 lite 独有。
 `tools/helper-drift` 会拿这三份和 full 插件检出目录（`$TEXP_UPSTREAM`，默认
 `../omarchy-tablet-experience`）比对，`--sync` 把 lite 的版本覆盖过去（改前缀）
 ——所以同一处只写一次。

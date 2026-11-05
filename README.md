@@ -63,6 +63,26 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   icons. This stops the icons colliding with the
   clock on the narrower portrait bar.
 
+- **Mousehop KVM switch** (its own bar widget, `maxt.mousehop` — installed
+  next to this plugin, not inside it) — shows whether the software-KVM client
+  is armed and flips it in one click. ON hands the pointer and keyboard to the
+  peer machine as soon as the pointer crosses that edge (an InputCapture
+  session, so local input is dropped while it lasts); OFF never captures at
+  all. Same action as `SUPER+SHIFT+K`.
+
+- **Folio touchpad rescue** — the X12 Detachable folio keyboard (Darfon
+  `17ef:60fe`) carries two very different devices on one HID interface: the real
+  touchpad (`BTN_TOOL_FINGER`/`DOUBLETAP`/`TRIPLETAP`, `ABS_MT_SLOT`,
+  `ABS_MT_TRACKING_ID`) and a legacy relative "mouse" collection. Detach the
+  keyboard, snap it back, and USB re-enumerates; `hid-multitouch` sometimes comes
+  back with the multitouch report channel dead. The cursor still moves and
+  clicks, but **tap, clickpad press and two- and three-finger gestures silently
+  stop working** — and no `ABS_MT` event ever reaches libinput, so nothing in
+  Hyprland or the touchpad settings is at fault. Only a driver re-bind brings it
+  back: `tlit-folio-touchpad` does that, and one udev rule plus a oneshot unit
+  run it two seconds after the keyboard appears, so re-attaching the folio
+  repairs itself. Manual: `sudo tlit-folio-touchpad`.
+
 Deliberately absent: laptop/tablet state machine, keyboard-auto-switch,
 handwriting, window management, bar decluttering, multi-touch gestures (the
 touch-swipe keyboard daemon is gone — the keyboard's ▼ key, `SUPER+U` and the
@@ -84,6 +104,9 @@ keyboard folded away.
   present on most Omarchy installs).
 - A touchscreen helps, but nothing is hardware-specific: the keyboard and voice
   work with a mouse too.
+- The folio touchpad rescue is the only hardware-specific piece: it matches the
+  X12 Detachable Gen 1 folio case (`17ef:60fe`) and never fires on other
+  machines.
 
 ## Install
 
@@ -105,12 +128,15 @@ It also works from a dev clone.
 |---|---|
 | *(none)* | helpers + wvkbd build + `SUPER+U` hook + voxtype wiring |
 | `--no-packages` | never invoke pacman (`wtype`) |
+| `--no-system` | skip the folio touchpad rescue (no sudo, nothing outside `$HOME`) |
 | `--no-wvkbd` | skip the build (the keyboard stays unavailable until built) |
 | `--dry-run` | preview everything, change nothing |
 | `--verify` | post-install self-check (read-only) |
 
-Nothing outside `$HOME` is written; only the `wtype` install needs sudo. Every
-modified file gets a `*.bak.<timestamp>` first.
+Nothing outside `$HOME` is written except the folio touchpad rescue (helper in
+`/usr/local/bin`, one systemd unit, one udev rule; `--no-system` skips it); only
+that and the `wtype` install need sudo. Every modified file gets a
+`*.bak.<timestamp>` first.
 
 **Reload the shell once** (or re-login) so the plugin loads fresh, then
 `install.sh --verify`.
@@ -131,6 +157,8 @@ modified file gets a `*.bak.<timestamp>` first.
 | Fix the text | **Delete** (BackSpace) / **Clear** (select-all+delete; readline `Ctrl+A`+`Ctrl+K` in terminals) / **Enter** |
 | Move the caret | the left-side **← → ↑ ↓** pad |
 | Agent keys (pi / codex) | **CLI keys ▲** → `esc` `/` `tab` `⇧tab` `⌃C` `⌃D` `⌃J` `⌃T` |
+| Mousehop KVM on/off | bar **⇄** (red = armed) · `SUPER+SHIFT+K` · `tlit-mousehop-toggle on|off|toggle|status` |
+| Touchpad dead after re-attaching the folio | automatic (udev rule → `tlit-folio-touchpad`) · manual: `sudo tlit-folio-touchpad` |
 
 IPC: `getState` · `voiceInputToggle|Show|Hide` · `keyboardToggle|Show|Hide` ·
 `cliKeysToggle` · `clearNow` · `rotationNext|rotationPrev` ·
@@ -149,8 +177,14 @@ scripts/tlit-state      rotation + auto preference file (survives restarts)
 scripts/tlit-orient     IIO accelerometer posture probe (auto-rotate)
 scripts/tlit-vtext      voxtype post-processing (technical-term table)
 scripts/tlit-mousehop   hand a software-KVM input capture back before typing
+scripts/tlit-mousehop-toggle  mousehop on/off (releases a live capture first)
+scripts/tlit-folio-touchpad  re-bind hid-multitouch on the folio keyboard (root)
+mousehop/               separate bar widget: mousehop KVM state + toggle
 tools/helper-drift      is the copy shared with the full plugin still the same code?
 config/hypr/tablet-lite.lua  SUPER+U + SUPER+SHIFT+R + above_lock rule
+config/hypr/mousehop.lua     SUPER+SHIFT+K (mousehop on/off)
+config/systemd/tlit-folio-touchpad.service  oneshot: re-bind 2 s after attach
+config/udev/99-tlit-folio-touchpad.rules    start it on 17ef:60fe add
 config/wvkbd/wvkbd-hide-key.patch  ▼ collapse key
 config/voxtype/replacements.tsv    default replacement table
 ```
@@ -159,9 +193,13 @@ Helpers are installed in `~/.local/bin` as `tlit-*`, deliberately apart from
 the full plugin's `texp-*` set: both plugins can be installed side by side
 without one overwriting the other's keyboard helper.
 
+`tlit-folio-touchpad` is the exception: udev and systemd run it as root, so it
+goes to `/usr/local/bin` together with its unit and rule (and `uninstall.sh`
+removes them with sudo, under the same byte-match rule).
+
 `mousehop`, `rotate` and `vtext` are literally the same program as the full
 plugin's `texp-*` copies (only the prefix differs); `vk`, `orient`,
-`install-wvkbd` and `state` are lite-only. `tools/helper-drift` checks the three
+`install-wvkbd`, `state` and `mousehop-toggle` are lite-only. `tools/helper-drift` checks the three
 shared ones against a full-plugin checkout (`$TEXP_UPSTREAM`, default
 `../omarchy-tablet-experience`) and `--sync` copies the lite version over,
 prefix renamed — so a fix is written once.
@@ -171,6 +209,7 @@ prefix renamed — so a fix is written once.
 ```sh
 ~/.config/omarchy/plugins/maxt.tablet-lite/uninstall.sh
 omarchy plugin remove maxt.tablet-lite
+omarchy plugin remove maxt.mousehop
 ```
 
 ## License

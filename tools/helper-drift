@@ -41,7 +41,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 SHARED=(mousehop rotate vtext)
-LITE_ONLY=(vk orient install-wvkbd state)
+LITE_ONLY=(vk orient install-wvkbd state mousehop-toggle)
 
 log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 bad()  { printf '\033[1;31m  !! \033[0m %s\n' "$*" >&2; }

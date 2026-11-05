@@ -48,7 +48,7 @@ Item {
   Component.onCompleted: console.log("tablet-lite Service LOADED v" + root.pluginVersion)
 
   property var shell: null
-  readonly property string pluginVersion: "2.0.1"
+  readonly property string pluginVersion: "2.1.0"
 
   // ---- labels -------------------------------------------------------------
   // The shell's language (~/.config/omarchy/language, which omarchy exposes as
