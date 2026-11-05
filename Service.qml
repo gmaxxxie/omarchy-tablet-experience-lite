@@ -53,7 +53,84 @@ Item {
   }
 
   property var shell: null
-  readonly property string pluginVersion: "1.7.0"
+  readonly property string pluginVersion: "1.8.0"
+
+  // ---- labels -------------------------------------------------------------
+  // The shell's language (~/.config/omarchy/language, which omarchy exposes as
+  // I18n.language) picks the table; an unknown key falls back to English, so
+  // a partial translation is safe. tf() fills a %1 hole.
+  readonly property bool useZh: String(I18n.language || "").toLowerCase().indexOf("zh") === 0
+  readonly property var enLabels: ({
+    "vk.tip.up": "Keyboard is up — tap to close (Super+U)",
+    "vk.tip.down": "Keyboard — tap to type on screen (Super+U)",
+    "voice.tip.up": "Hide voice input button",
+    "voice.tip.down": "Voice input — hold to talk",
+    "rotate.tip.auto": "Rotation: auto (sensor) — tap to choose",
+    "rotate.tip.angle": "Rotation: %1 — tap to choose",
+    "tablet.tip": "Tablet controls — keyboard / voice / rotation",
+    "tablet.header": "Tablet",
+    "popup.keyboard": "Keyboard",
+    "popup.keyboard.up": "Keyboard (up)",
+    "popup.voice": "Voice input",
+    "popup.voice.up": "Voice (open)",
+    "rotate.header": "Rotation",
+    "rotate.auto": "Auto (sensor)",
+    "rotate.prev": "90° ⟲",
+    "rotate.next": "90° ⟳",
+    "osd.rotate": "Rotate: %1",
+    "osd.auto.on": "Auto-rotate: on (sensor)",
+    "osd.auto.off": "Auto-rotate: off",
+    "voice.hold": "Hold to talk",
+    "voice.release": "Release to finish",
+    "voice.transcribing": "Transcribing…",
+    "voice.down": "Dictation not running",
+    "action.delete": "Delete",
+    "action.clear": "Clear",
+    "action.enter": "Enter",
+    "cli.keys": "CLI keys"
+  })
+  readonly property var zhLabels: ({
+    "vk.tip.up": "键盘已打开 — 点此收起 (Super+U)",
+    "vk.tip.down": "屏幕键盘 — 点此输入 (Super+U)",
+    "voice.tip.up": "收起语音输入",
+    "voice.tip.down": "语音输入 — 按住说话",
+    "rotate.tip.auto": "旋转：自动（传感器）— 点此选择",
+    "rotate.tip.angle": "旋转：%1 — 点此选择",
+    "tablet.tip": "平板控制 — 键盘 / 语音 / 旋转",
+    "tablet.header": "平板",
+    "popup.keyboard": "屏幕键盘",
+    "popup.keyboard.up": "屏幕键盘（已打开）",
+    "popup.voice": "语音输入",
+    "popup.voice.up": "语音输入（已打开）",
+    "rotate.header": "屏幕旋转",
+    "rotate.auto": "自动（传感器）",
+    "rotate.prev": "左转 90°",
+    "rotate.next": "右转 90°",
+    "osd.rotate": "旋转：%1",
+    "osd.auto.on": "自动旋转：开启（传感器）",
+    "osd.auto.off": "自动旋转：关闭",
+    "voice.hold": "按住说话",
+    "voice.release": "松开结束",
+    "voice.transcribing": "转写中…",
+    "voice.down": "听写服务未运行",
+    "action.delete": "删除",
+    "action.clear": "清空",
+    "action.enter": "回车",
+    "cli.keys": "CLI 按键"
+  })
+
+  function t(key) {
+    if (root.useZh) {
+      var zh = root.zhLabels[key]
+      if (zh !== undefined) return zh
+    }
+    var en = root.enLabels[key]
+    return en !== undefined ? en : String(key)
+  }
+
+  function tf(key, value) {
+    return String(root.t(key)).replace("%1", String(value))
+  }
 
   // Voice input (hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing
@@ -86,8 +163,15 @@ Item {
 
   // Rotation state. `rotation` is the last applied transform (0-3); "auto" is
   // a separate flag because the sensor keeps changing the live angle.
-  readonly property string rotation: persisted.rotation
-  readonly property bool autoOrient: persisted.autoOrient
+  // These two survive shell restarts in a plain file (see setPref below):
+  // auto is the default, and picking an angle in the rotation picker turns it
+  // off.
+  property string rotation: ""
+  property bool autoOrient: true
+  property bool prefsLoaded: false
+  property var pendingPrefs: ({})
+  readonly property string statePath: (Quickshell.env("XDG_STATE_HOME")
+    || (Quickshell.env("HOME") + "/.local/state")) + "/tablet-lite/state"
   property string orientation: "unknown"
   property string appliedFor: ""
   property bool pendingRelative: false
@@ -97,12 +181,56 @@ Item {
   readonly property bool portrait: root.liveTransform === 1 || root.liveTransform === 3
   readonly property var rotationRing: ["0", "1", "2", "3"]
 
-  PersistentProperties {
-    id: persisted
-    reloadableId: "maxt-tablet-lite"
-    property string rotation: ""
-    property bool autoOrient: false
+  // Preferences are kept in $XDG_STATE_HOME/tablet-lite/state by tlit-state:
+  // Quickshell's PersistentProperties writes nothing in this shell build (no
+  // state dir is ever created, so rotation and the auto flag silently reset on
+  // every restart). A plain key=value file is boring and verifiable.
+  FileView {
+    id: prefsFile
+    path: root.statePath
+    printErrors: false
+    onLoaded: root.applyPrefs(text())
   }
+
+  // Writes are queued: two quick taps cannot drop one of them.
+  BoundedProcess {
+    id: prefsWriter
+    command: ["tlit-state", "set", "rotation", "0"]
+    onStreamFinished: root.flushPrefs()
+  }
+
+  function applyPrefs(raw) {
+    var values = {}
+    var lines = String(raw || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var eq = lines[i].indexOf("=")
+      if (eq > 0) values[lines[i].slice(0, eq).trim()] = lines[i].slice(eq + 1).trim()
+    }
+    root.rotation = values.rotation || ""
+    root.autoOrient = values.auto === undefined ? true : values.auto === "on"
+    root.prefsLoaded = true
+    root.initRotation()
+  }
+
+  function setPref(key, value) {
+    var v = String(value)
+    if (key === "rotation") root.rotation = v
+    else if (key === "auto") root.autoOrient = (v === "on")
+    root.pendingPrefs[key] = v
+    root.flushPrefs()
+  }
+
+  function flushPrefs() {
+    if (prefsWriter.running) return
+    var keys = Object.keys(root.pendingPrefs)
+    if (keys.length === 0) return
+    var key = keys[0]
+    var value = root.pendingPrefs[key]
+    delete root.pendingPrefs[key]
+    prefsWriter.command = ["tlit-state", "set", key, value]
+    prefsWriter.running = true
+  }
+
 
   property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || ""
   readonly property string voxtypeStateDir: root.runtimeDir + "/voxtype"
@@ -156,8 +284,9 @@ Item {
         root.pendingRelative = false
         var m = /^([0-3])\s*$/.exec(String(output || "").trim())
         if (m) {
-          persisted.rotation = m[1]
+          root.setPref("rotation", m[1])
           root.liveTransform = Number(m[1])
+          root.osd("rotate-cw", root.tf("osd.rotate", root.rotationLabel(m[1])))
         }
       }
     }
@@ -193,15 +322,15 @@ Item {
   // (used for startup restore and sensor-following); manual actions show it.
   function applyRotation(value, silent) {
     if (rotateCmd.running) return false
-    var t = String(value || "0")
-    if (root.rotationRing.indexOf(t) === -1) t = "0"
-    var cmd = ["tlit-rotate"]
-    if (silent) cmd.push("-s")
-    cmd.push(t)
-    rotateCmd.command = cmd
+    var target = String(value || "0")
+    if (root.rotationRing.indexOf(target) === -1) target = "0"
+    // Always -s: tlit-rotate's own OSD is English-only, so the text is shown
+    // here instead, in the shell's language.
+    rotateCmd.command = ["tlit-rotate", "-s", target]
     rotateCmd.running = true
-    persisted.rotation = t
-    root.liveTransform = Number(t)
+    root.setPref("rotation", target)
+    root.liveTransform = Number(target)
+    if (!silent) root.osd("rotate-cw", root.tf("osd.rotate", root.rotationLabel(target)))
     return true
   }
 
@@ -209,10 +338,10 @@ Item {
   // `prev` clockwise (same convention as the full plugin).
   function rotateStep(dir) {
     if (rotateCmd.running) return
-    persisted.autoOrient = false
+    root.setPref("auto", "off")
     root.appliedFor = ""
     root.pendingRelative = true
-    rotateCmd.command = ["tlit-rotate", dir]
+    rotateCmd.command = ["tlit-rotate", "-s", dir]
     rotateCmd.running = true
   }
 
@@ -222,31 +351,31 @@ Item {
   // Bar right-click / IPC: sensor-following on/off. Turning it off keeps the
   // screen where the sensor last put it.
   function toggleAutoRotate() {
-    persisted.autoOrient = !persisted.autoOrient
+    root.setPref("auto", root.autoOrient ? "off" : "on")
     root.appliedFor = ""
-    if (persisted.autoOrient) {
-      root.osd("rotate-cw", "Auto-rotate: on (sensor)")
+    if (root.autoOrient) {
+      root.osd("rotate-cw", root.t("osd.auto.on"))
       root.ensureOrientationWatch()
     } else {
-      root.osd("rotate-cw", "Auto-rotate: off")
+      root.osd("rotate-cw", root.t("osd.auto.off"))
     }
   }
 
   function setRotationPreset(value) {
     var v = String(value || "").toLowerCase()
     if (v === "auto") {
-      if (!persisted.autoOrient) root.toggleAutoRotate()
+      if (!root.autoOrient) root.toggleAutoRotate()
       else root.ensureOrientationWatch()
       return
     }
     if (root.rotationRing.indexOf(v) === -1) return
-    persisted.autoOrient = false
+    root.setPref("auto", "off")
     root.appliedFor = ""
     root.applyRotation(v, false)
   }
 
   function applyOrientation() {
-    if (!persisted.autoOrient) return
+    if (!root.autoOrient) return
     if (root.orientation === "unknown") return
     if (root.appliedFor === root.orientation) return
     if (root.applyRotation(root.rotationTransform(root.orientation), true))
@@ -258,7 +387,7 @@ Item {
   // process spawn every 1.5 s with a reader that costs well under 1% of a
   // core, and turns the posture into an event instead of a poll.
   function ensureOrientationWatch() {
-    if (!persisted.autoOrient) {
+    if (!root.autoOrient) {
       if (orientationWatch.running) orientationWatch.running = false
       return
     }
@@ -271,8 +400,8 @@ Item {
   // asynchronous): restore the last angle, or adopt the current one on first
   // install. Auto mode starts the sensor reader instead.
   function initRotation() {
-    if (persisted.autoOrient) { root.ensureOrientationWatch(); return }
-    if (persisted.rotation) root.applyRotation(persisted.rotation, true)
+    if (root.autoOrient) { root.ensureOrientationWatch(); return }
+    if (root.rotation) root.applyRotation(root.rotation, true)
     else if (!transformProbe.running) transformProbe.running = true
   }
 
@@ -585,7 +714,7 @@ Item {
       // Sensor vanished or could not be read: stop trusting the last posture
       // and retry while auto-rotate is still on.
       root.orientation = "unknown"
-      if (persisted.autoOrient) orientationRetry.start()
+      if (root.autoOrient) orientationRetry.start()
     }
   }
 
@@ -605,7 +734,10 @@ Item {
         if (!Array.isArray(ms) || ms.length === 0) return
         var t = String(Number(ms[0].transform || 0))
         root.liveTransform = Number(t)
-        if (!persisted.rotation) persisted.rotation = t
+        // Adopt the live angle on first run, without writing a preference:
+        // an angle the user never picked must not turn auto-mode into a
+        // fixed one on the next start.
+        if (!root.rotation) root.rotation = t
       } catch (e) {}
     }
   }
@@ -703,10 +835,10 @@ Item {
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: {
-              if (!root.voxtypeUp) return "Dictation not running"
-              if (root.transcribing) return "Transcribing…"
-              if (root.holding || root.recording) return "Release to finish"
-              return "Hold to talk"
+              if (!root.voxtypeUp) return root.t("voice.down")
+              if (root.transcribing) return root.t("voice.transcribing")
+              if (root.holding || root.recording) return root.t("voice.release")
+              return root.t("voice.hold")
             }
             color: Color.foreground
             font.family: Style.font.family
@@ -780,7 +912,7 @@ Item {
               border.color: Util.alpha(Color.foreground, 0.3)
               Text {
                 anchors.centerIn: parent
-                text: "Delete"
+                text: root.t("action.delete")
                 color: Color.foreground
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
@@ -797,7 +929,7 @@ Item {
               border.color: Util.alpha(Color.foreground, 0.3)
               Text {
                 anchors.centerIn: parent
-                text: "Clear"
+                text: root.t("action.clear")
                 color: Color.foreground
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
@@ -814,7 +946,7 @@ Item {
               border.color: Util.alpha(Color.foreground, 0.3)
               Text {
                 anchors.centerIn: parent
-                text: "Enter"
+                text: root.t("action.enter")
                 color: Color.foreground
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
@@ -904,7 +1036,7 @@ Item {
               border.color: Util.alpha(Color.foreground, 0.22)
               Text {
                 anchors.centerIn: parent
-                text: root.cliKeysOpen ? "CLI keys  \u25BC" : "CLI keys  \u25B2"
+                text: root.t("cli.keys") + (root.cliKeysOpen ? "  \u25BC" : "  \u25B2")
                 color: Util.alpha(Color.foreground, 0.85)
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall

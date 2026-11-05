@@ -30,21 +30,23 @@
 - **CLI keys + 光标板只在语音模式显示** —— 和按住说话浮层一起出现；键盘打开时
   自动隐藏，因为键盘本身已经有 Esc / Tab / Ctrl / 方向键，不再遮住键盘上方的
   内容。
-- **屏幕旋转** —— 状态栏 **⟳** 按钮和 **`SUPER+SHIFT+R`** 在 0° / 90° /
-  180° / 270° 之间旋转。旁边的 **🧭** 按钮开关**传感器自动旋转**
-  （`tlit-orient` 读 sysfs 加速度计，按 ThinkPad X12 校准），开启时高亮。
-  自动旋转用**一个常驻读取进程**，只在姿态变化时上报（不再每秒起进程）。
-  每次旋转都会**保留当前缩放**并同步 Hyprland 的**触摸校准矩阵**
-  （`tlit-rotate`），最后一个角度会持久化，shell 重启不会悄悄转回横屏。
+- **屏幕旋转** —— 状态栏只留**一个** **⟳** 按钮，点开是选择面板：
+  **自动（传感器）**（默认）+ 0° / 90° / 180° / 270° + ⟲/⟳ 90° 两键，
+  所以不再需要第二个 🧭 图标。`SUPER+SHIFT+R` 仍然可以步进旋转。
+  选固定角度会关掉自动；选「自动」交回 `tlit-orient`（读 sysfs 加速度计，
+  按 ThinkPad X12 校准），它用一个**常驻读取进程**，只在姿态变化时上报
+  （不再每秒起进程）。每次旋转都会**保留当前缩放**并同步 Hyprland 的
+  **触摸校准矩阵**（`tlit-rotate`）；选择的角度和自动开关由 `tlit-state`
+  存盘，shell 重启后保持。
 
 - **锁屏键盘** —— 锁屏时**自动升起键盘**用于输入密码（指纹仍然可用），
   通过 `above_lock` 渲染在 Omarchy 锁屏界面之上。密码框右侧有一个浮动 **⌨**
   按钮，键盘被 **▼** 收起后可再次调出；解锁时自动放下。shell 启动时会预启动
   键盘并隐藏，锁屏下升起时不需要在已锁定的会话里新建 Wayland 客户端。
 
-- **竖屏时状态栏自动折叠** —— 在 90°/270° 竖屏下，四个触控图标（键盘 /
-  语音 / 旋转 / 自动旋转）折叠成一个**平板按钮**，点开弹窗后以触屏大小提供
-  同样四个操作；横屏仍保留一键直达的四个图标。这样竖屏窄状态栏里图标不会
+- **竖屏时状态栏自动折叠** —— 在 90°/270° 竖屏下，三个触控图标（键盘 /
+  语音 / 旋转）折叠成一个**平板按钮**，点开弹窗后以触屏大小提供同样的操作；
+  横屏仍保留一键直达的三个图标。这样竖屏窄状态栏里图标不会
   再和时钟挤在一起。
 
 有意去掉：笔记本/平板状态机、键盘自动切换、手写、窗口管理、状态栏精简、
@@ -98,10 +100,10 @@ omarchy plugin add https://github.com/gmaxxxie/omarchy-tablet-experience-lite.gi
 |---|---|
 | 开关虚拟键盘 | `SUPER+U` · 状态栏 **⌨** · `omarchy-shell maxt.tablet-lite keyboardToggle` |
 | 收起键盘 | 键盘上的 **▼** 键 |
-| 旋转 90° | `SUPER+SHIFT+R` · 状态栏 **⟳** · `omarchy-shell maxt.tablet-lite rotationNext` |
-| 传感器自动旋转 | 状态栏 **🧭** · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
-| 指定角度 | `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
-| 竖屏状态栏 | 四个图标折叠成一个**平板按钮** → 弹窗里选键盘 / 语音 / 旋转 / 自动 |
+| 旋转 | 状态栏 **⟳** → 选择面板（自动 / 0° / 90° / 180° / 270° / ⟲ ⟳）· `SUPER+SHIFT+R` 步进 · `omarchy-shell maxt.tablet-lite rotationNext` |
+| 传感器自动旋转（默认） | 面板里的**自动** · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
+| 指定角度 | 面板里的角度行 · `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
+| 竖屏状态栏 | 三个图标折叠成一个**平板按钮** → 弹窗里选键盘 / 语音 / 旋转 |
 | 锁屏键盘 | 锁屏自动升起；密码框右侧浮动 **⌨** 按钮可重调；**▼** 收起 |
 | 开/关语音浮层 | 状态栏 **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |
 | 说话输入 | 按住大麦克风，松开转写 |

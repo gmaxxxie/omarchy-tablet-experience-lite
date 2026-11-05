@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# tlit-state — the preferences Tablet Lite keeps across shell restarts.
+#
+# Quickshell's PersistentProperties does not write anything in this shell build
+# (no state dir is ever created, so the rotation and the auto flag silently
+# reset on every restart). The plugin therefore keeps its two settings in a
+# plain key=value file, written atomically under a lock.
+#
+#   tlit-state                 print every key (key=value lines)
+#   tlit-state get KEY         print one value (empty when unset)
+#   tlit-state set KEY VALUE   write one key (VALUE may be empty)
+#   tlit-state unset KEY       drop one key
+#
+# Known keys: rotation ("0".."3", empty = never chosen) and auto ("on"/"off").
+# File: $XDG_STATE_HOME/tablet-lite/state (default ~/.local/state/tablet-lite).
+set -euo pipefail
+
+DIR="${XDG_STATE_HOME:-$HOME/.local/state}/tablet-lite"
+FILE="$DIR/state"
+LOCK="$DIR/state.lock"
+
+usage() { sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+valid_key() { [[ ${1:-} =~ ^[a-z][a-z0-9_]*$ ]]; }
+
+# Value of one key, or nothing.
+get_key() { # $1 key
+  [ -f "$FILE" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      "$1="*) printf '%s\n' "${line#*=}"; return 0 ;;
+    esac
+  done <"$FILE"
+  return 0
+}
+
+# Rewrite the file with one key replaced/added, atomically.
+set_key() { # $1 key $2 value
+  local tmp found=0
+  tmp="$(mktemp "$FILE.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  if [ -f "$FILE" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      case "$line" in
+        "$1="*) [[ $found -eq 1 ]] || printf '%s=%s\n' "$1" "$2" >>"$tmp"; found=1 ;;
+        *) printf '%s\n' "$line" >>"$tmp" ;;
+      esac
+    done <"$FILE"
+  fi
+  [[ $found -eq 1 ]] || printf '%s=%s\n' "$1" "$2" >>"$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$FILE"
+  trap - EXIT
+}
+
+unset_key() { # $1 key
+  [ -f "$FILE" ] || return 0
+  local tmp
+  tmp="$(mktemp "$FILE.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      "$1="*) : ;;
+      *) printf '%s\n' "$line" >>"$tmp" ;;
+    esac
+  done <"$FILE"
+  mv -f "$tmp" "$FILE"
+  trap - EXIT
+}
+
+mkdir -p "$DIR"
+exec 9>"$LOCK"
+flock -w 3 9 || { echo "tlit-state: state file is busy" >&2; exit 1; }
+
+cmd="${1:-get}"
+case "$cmd" in
+  get)
+    if [[ $# -ge 2 ]]; then valid_key "$2" || { usage >&2; exit 2; }; get_key "$2"
+    elif [[ -f "$FILE" ]]; then cat "$FILE"
+    fi
+    ;;
+  set)
+    [[ $# -eq 3 ]] || { usage >&2; exit 2; }
+    valid_key "$2" || { usage >&2; exit 2; }
+    [[ $3 != *$'\n'* ]] || { echo "tlit-state: value must be one line" >&2; exit 2; }
+    set_key "$2" "$3"
+    ;;
+  unset)
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    valid_key "$2" || { usage >&2; exit 2; }
+    unset_key "$2"
+    ;;
+  -h|--help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

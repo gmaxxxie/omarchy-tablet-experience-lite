@@ -34,15 +34,16 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
 - **CLI keys + caret pad are voice-mode only** — they appear with the
   hold-to-talk overlay, where there is no keyboard. With the keyboard up they
   are hidden: the keyboard itself already carries Esc / Tab / Ctrl / arrows.
-- **Rotation** — the bar **⟳** button and **`SUPER+SHIFT+R`** step the display
-  through 0° / 90° / 180° / 270°. The separate **🧭** button toggles
-  **sensor-following auto-rotate** (`tlit-orient`, sysfs accelerometer,
-  calibrated for the ThinkPad X12) and highlights while it is on. Auto-rotate
-  runs **one long-lived reader** that reports a posture only when it changes
-  (no per-second process spawn). Every
-  rotation **preserves the monitor scale** and keeps Hyprland's **touch
-  calibration matrix** in step (`tlit-rotate`), and the last angle is persisted
-  across shell restarts.
+- **Rotation** — **one** bar button (**⟳**) opens a picker: **Auto (sensor)**,
+  the default, plus 0° / 90° / 180° / 270° and ⟲/⟳ 90° steps — so the bar no
+  longer needs a second compass icon. `SUPER+SHIFT+R` still steps the display.
+  Picking an angle turns sensor following off; Auto hands the screen back to
+  `tlit-orient` (sysfs accelerometer, calibrated for the ThinkPad X12), which
+  runs as **one long-lived reader** and reports only when the posture changes
+  (no per-second process spawn). Every rotation **preserves the monitor scale**
+  and keeps Hyprland's **touch calibration matrix** in step (`tlit-rotate`).
+  The chosen angle and the auto flag are kept by `tlit-state` and survive shell
+  restarts.
 
 - **Lock screen** — the keyboard **auto-raises when the session locks** for
   password entry (fingerprint stays available), rendered above the Omarchy
@@ -51,10 +52,10 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   put back down on unlock. The keyboard is pre-started hidden at shell start
   so raising it under the lock never has to connect a new Wayland client.
 
-- **Portrait-folded bar controls** — at 90°/270° the four touch icons
-  (keyboard / voice / rotate / auto-rotate) collapse into **one tablet
-  button** whose popup carries the same four actions at touch size; landscape
-  keeps the direct one-tap icons. This stops the icons colliding with the
+- **Portrait-folded bar controls** — at 90°/270° the three touch icons
+  (keyboard / voice / rotate) collapse into **one tablet button** whose popup
+  carries the same actions at touch size; landscape keeps the direct one-tap
+  icons. This stops the icons colliding with the
   clock on the narrower portrait bar.
 
 Deliberately absent: laptop/tablet state machine, keyboard-auto-switch,
@@ -109,10 +110,10 @@ already installed. Every modified file gets a `*.bak.<timestamp>` first.
 |---|---|
 | Toggle virtual keyboard | `SUPER+U` · bar **⌨** · `omarchy-shell maxt.tablet-lite keyboardToggle` |
 | Fold the keyboard away | its **▼** key |
-| Rotate 90° | `SUPER+SHIFT+R` · bar **⟳** · `omarchy-shell maxt.tablet-lite rotationNext` |
-| Sensor auto-rotate | bar **🧭** · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
-| Set an exact angle | `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
-| Portrait bar | the four icons fold into one **tablet** button → popup with keyboard / voice / rotate / auto |
+| Rotation | bar **⟳** → picker (Auto / 0° / 90° / 180° / 270° / ⟲ ⟳) · `SUPER+SHIFT+R` steps · `omarchy-shell maxt.tablet-lite rotationNext` |
+| Sensor auto-rotate (default) | the picker's **Auto** row · `omarchy-shell maxt.tablet-lite autoRotateToggle` |
+| Set an exact angle | the picker's angle row · `omarchy-shell maxt.tablet-lite setRotation 0|1|2|3|auto` |
+| Portrait bar | the three icons fold into one **tablet** button → popup with keyboard / voice / rotation |
 | Lock screen keyboard | raises automatically on lock; floating **⌨** button right of the password field; **▼** folds it |
 | Open/close voice input | bar **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |
 | Dictate | press & hold the big mic, release to transcribe |
@@ -133,6 +134,7 @@ BarWidget.qml           bar buttons: ⌨ keyboard + 🎤 voice
 scripts/tlit-vk         keyboard toggle/show/hide (wvkbd only)
 scripts/tlit-install-wvkbd  user-local wvkbd-deskintl build (pinned v0.21 + SHA-256)
 scripts/tlit-rotate     rotate display + touch matrix, preserve scale
+scripts/tlit-state      rotation + auto preference file (survives restarts)
 scripts/tlit-orient     IIO accelerometer posture probe (auto-rotate)
 scripts/tlit-vtext      voxtype post-processing (technical-term table)
 scripts/tlit-mousehop   hand a software-KVM input capture back before typing

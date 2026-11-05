@@ -91,7 +91,7 @@ if [ "$VERIFY" -eq 1 ]; then
   log "Tablet Lite self-check (read-only)"
   fail=0
 
-  for s in tlit-vk tlit-vtext tlit-mousehop tlit-install-wvkbd tlit-rotate tlit-orient; do
+  for s in tlit-vk tlit-vtext tlit-mousehop tlit-install-wvkbd tlit-rotate tlit-orient tlit-state; do
     if [ -x "$BIN_DIR/$s" ]; then ok "helper $BIN_DIR/$s"; else bad "helper missing: $BIN_DIR/$s"; fail=1; fi
   done
 
