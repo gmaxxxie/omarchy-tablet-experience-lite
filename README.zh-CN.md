@@ -14,7 +14,9 @@
   编译，并加了一个可见的 **▼ 收起键**，随处都能把键盘折起来。切换方式：
   `SUPER+U`、状态栏 **⌨** 按钮、或
   `omarchy-shell maxt.tablet-lite keyboardToggle`。wvkbd 是**唯一**后端：lite
-  构建缺失时 helper 会直接报错，不再悄悄换成按键不同的另一种键盘。
+  构建缺失时 helper 会直接报错，不再悄悄换成按键不同的另一种键盘。状态栏的
+  键盘高亮跟着 Hyprland 的 `openlayer` / `closelayer` 事件走，用 **▼** 键收起
+  键盘后立即同步。
 - **语音输入** —— 状态栏 **🎤** 按钮打开底部的按住说话浮层。按住开始，
   松开后由 `omarchy dictation start|stop` 完成转写：这就是 `ALT+SPACE` /
   `Alt_R` / `F9` 快捷键走的那套命令，后端（voxtype、superwhisper…）由
@@ -31,6 +33,7 @@
 - **屏幕旋转** —— 状态栏 **⟳** 按钮和 **`SUPER+SHIFT+R`** 在 0° / 90° /
   180° / 270° 之间旋转。旁边的 **🧭** 按钮开关**传感器自动旋转**
   （`tlit-orient` 读 sysfs 加速度计，按 ThinkPad X12 校准），开启时高亮。
+  自动旋转用**一个常驻读取进程**，只在姿态变化时上报（不再每秒起进程）。
   每次旋转都会**保留当前缩放**并同步 Hyprland 的**触摸校准矩阵**
   （`tlit-rotate`），最后一个角度会持久化，shell 重启不会悄悄转回横屏。
 

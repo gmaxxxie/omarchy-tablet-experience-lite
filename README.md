@@ -17,7 +17,9 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   the bar **⌨** button, or
   `omarchy-shell maxt.tablet-lite keyboardToggle`. wvkbd is the **only**
   backend: when the lite build is missing the helper says so instead of
-  silently switching to a keyboard with different modifiers.
+  silently switching to a keyboard with different modifiers. The bar's
+  keyboard highlight follows Hyprland's `openlayer` / `closelayer` events, so
+  folding the keyboard away with its own **▼** key lights up immediately.
 - **Voice input** — the bar **🎤** button opens a bottom hold-to-talk overlay.
   Press & hold → `omarchy dictation start`, release → `omarchy dictation stop`:
   the same commands the `ALT+SPACE` / `Alt_R` / `F9` hotkeys use, so Omarchy
@@ -35,7 +37,9 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
 - **Rotation** — the bar **⟳** button and **`SUPER+SHIFT+R`** step the display
   through 0° / 90° / 180° / 270°. The separate **🧭** button toggles
   **sensor-following auto-rotate** (`tlit-orient`, sysfs accelerometer,
-  calibrated for the ThinkPad X12) and highlights while it is on. Every
+  calibrated for the ThinkPad X12) and highlights while it is on. Auto-rotate
+  runs **one long-lived reader** that reports a posture only when it changes
+  (no per-second process spawn). Every
   rotation **preserves the monitor scale** and keeps Hyprland's **touch
   calibration matrix** in step (`tlit-rotate`), and the last angle is persisted
   across shell restarts.

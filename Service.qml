@@ -53,7 +53,7 @@ Item {
   }
 
   property var shell: null
-  readonly property string pluginVersion: "1.5.0"
+  readonly property string pluginVersion: "1.6.0"
 
   // Voice input (hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing
@@ -226,7 +226,7 @@ Item {
     root.appliedFor = ""
     if (persisted.autoOrient) {
       root.osd("rotate-cw", "Auto-rotate: on (sensor)")
-      root.pollOrientation()
+      root.ensureOrientationWatch()
     } else {
       root.osd("rotate-cw", "Auto-rotate: off")
     }
@@ -236,7 +236,7 @@ Item {
     var v = String(value || "").toLowerCase()
     if (v === "auto") {
       if (!persisted.autoOrient) root.toggleAutoRotate()
-      else root.pollOrientation()
+      else root.ensureOrientationWatch()
       return
     }
     if (root.rotationRing.indexOf(v) === -1) return
@@ -253,16 +253,25 @@ Item {
       root.appliedFor = root.orientation
   }
 
-  function pollOrientation() {
-    if (!persisted.autoOrient) return
-    if (!orientationProbe.running) orientationProbe.running = true
+  // Auto-rotate keeps ONE long-lived sensor reader (`tlit-orient --watch`),
+  // which prints a posture line only when it changes. That replaces a 380 ms
+  // process spawn every 1.5 s with a reader that costs well under 1% of a
+  // core, and turns the posture into an event instead of a poll.
+  function ensureOrientationWatch() {
+    if (!persisted.autoOrient) {
+      if (orientationWatch.running) orientationWatch.running = false
+      return
+    }
+    if (!orientationWatch.running) orientationWatch.running = true
   }
+
+  onAutoOrientChanged: root.ensureOrientationWatch()
 
   // Runs once after the shell starts (PersistentProperties restore may be
   // asynchronous): restore the last angle, or adopt the current one on first
-  // install. Auto mode starts the sensor poll instead.
+  // install. Auto mode starts the sensor reader instead.
   function initRotation() {
-    if (persisted.autoOrient) { root.pollOrientation(); return }
+    if (persisted.autoOrient) { root.ensureOrientationWatch(); return }
     if (persisted.rotation) root.applyRotation(persisted.rotation, true)
     else if (!transformProbe.running) transformProbe.running = true
   }
@@ -401,16 +410,34 @@ Item {
 
   // ---- state pollers -----------------------------------------------------
 
-  function onVkState(out) {
-    var vis = /visible/.test(String(out || ""))
+  function setVkVisible(vis) {
     var changed = vis !== root.vkVisible
     root.vkVisible = vis
     if (changed && vis && root.voiceInputOpen) root.hideVoiceInput()
     if (changed && !vis) root.cliKeysOpen = false
   }
 
+  function onVkState(out) {
+    root.setVkVisible(/visible/.test(String(out || "")))
+  }
+
   function pollVk() {
     if (!vkProbe.running) vkProbe.running = true
+  }
+
+  // Hyprland's event socket: `openlayer` / `closelayer` is the keyboard's real
+  // state, so folding it away with its own ▼ key is reflected the moment the
+  // layer unmaps instead of up to 1.5 s later. Monitor events re-read the
+  // transform, which has no event of its own.
+  function onHyprEvent(line) {
+    root.hyprEventCount++
+    var m = /^(openlayer|closelayer)>>(.*)$/.exec(line)
+    if (m) {
+      if (String(m[2]).indexOf("wvkbd") !== -1)
+        root.setVkVisible(m[1] === "openlayer")
+      return
+    }
+    if (/^monitor(added|removed|layout)/.test(line)) root.pollTransform()
   }
 
   // Backend state names: idle / recording / transcribing / outputting /
@@ -542,20 +569,31 @@ Item {
     onFileChanged: if (!vxStateProbe.running) vxStateProbe.running = true
   }
 
-  // Rotation probes: the sensor posture (tlit-orient reads sysfs, no daemon)
-  // and the current monitor transform (to adopt the angle on first install).
-  BoundedProcess {
-    id: orientationProbe
-    command: ["tlit-orient", "--json"]
-    onStreamFinished: {
-      var o = "unknown"
-      try {
-        var d = JSON.parse(output || "")
-        if (d && typeof d.label === "string") o = d.label
-      } catch (e) {}
-      root.orientation = o
-      root.applyOrientation()
+  // Auto-rotate sensor reader: one long-lived process, labels on change only.
+  Process {
+    id: orientationWatch
+    command: ["tlit-orient", "--watch"]
+    stdout: SplitParser {
+      onRead: function(line) {
+        var label = String(line || "").trim()
+        if (!label) return
+        root.orientation = label
+        root.applyOrientation()
+      }
     }
+    onExited: {
+      // Sensor vanished or could not be read: stop trusting the last posture
+      // and retry while auto-rotate is still on.
+      root.orientation = "unknown"
+      if (persisted.autoOrient) orientationRetry.start()
+    }
+  }
+
+  Timer {
+    id: orientationRetry
+    interval: 3000
+    repeat: false
+    onTriggered: root.ensureOrientationWatch()
   }
 
   BoundedProcess {
@@ -572,13 +610,56 @@ Item {
     }
   }
 
+  // Hyprland's event socket — the keyboard's visibility and monitor changes
+  // arrive here instead of being polled. `connected` follows whether the
+  // session actually has a Hyprland instance signature.
+  property int hyprEventCount: 0
+
+  readonly property string hyprEventSocket: {
+    var his = Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") || ""
+    return his ? root.runtimeDir + "/hypr/" + his + "/.socket2.sock" : ""
+  }
+
+  Socket {
+    id: hyprEventConn
+    path: root.hyprEventSocket
+    connected: root.hyprEventSocket !== ""
+    parser: SplitParser {
+      onRead: function(line) { root.onHyprEvent(String(line || "")) }
+    }
+    // A (re)connect can miss events that happened while it was down.
+    onConnectedChanged: if (connected) {
+      root.pollVk()
+      root.pollTransform()
+    }
+  }
+
+  // Lock state has no event source (ext-session-lock is not a layer), and the
+  // keyboard must come up with the lock, so this one stays a cheap poll: the
+  // lock plugin's IPC answers in ~7 ms.
   Timer {
-    id: autoPoller
+    id: lockPoller
     interval: 1500
-    running: persisted.autoOrient
+    running: true
     repeat: true
     triggeredOnStart: true
-    onTriggered: root.pollOrientation()
+    onTriggered: root.pollLock()
+  }
+
+  // Safety net for the event-driven state above: the keyboard layer, the
+  // voxtype state file and the transform each have an event/watch already, so
+  // this only catches one that was missed (socket down, file created late).
+  Timer {
+    id: slowPoller
+    interval: 5000
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: {
+      root.pollVk()
+      root.pollVoxtype()
+      root.pollTransform()
+    }
   }
 
   // The shell may restore PersistentProperties asynchronously; wait before
@@ -592,20 +673,6 @@ Item {
     onTriggered: {
       root.initRotation()
       root.preStartVk()
-    }
-  }
-
-  Timer {
-    id: poller
-    interval: 1500
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: {
-      root.pollVoxtype()
-      root.pollVk()
-      root.pollLock()
-      root.pollTransform()
     }
   }
 
@@ -995,6 +1062,9 @@ Item {
         orientation: root.orientation,
         locked: root.locked,
         lockVkShown: root.lockVkShown,
+        hyprEventSocket: root.hyprEventSocket,
+        hyprEventConnected: hyprEventConn.connected,
+        hyprEventsSeen: root.hyprEventCount,
         version: root.pluginVersion
       })
     }
@@ -1068,7 +1138,7 @@ Item {
       var v = String(value || "").toLowerCase()
       var on = (v === "on" || v === "true" || v === "1" || v === "yes")
       if (on !== root.autoOrient) root.toggleAutoRotate()
-      else if (on) root.pollOrientation()
+      else if (on) root.ensureOrientationWatch()
       return root.autoOrient ? "on" : "off"
     }
   }

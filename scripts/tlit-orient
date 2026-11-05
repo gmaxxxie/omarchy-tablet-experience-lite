@@ -12,11 +12,22 @@ classify() for the full table):
   unknown     flat / not enough signal
 
 NOTE: sensor mounting and axis signs differ per board; this calibration was
-measured physically on the ThinkPad X12 (DEVELOPMENT.md Phase 6). If you
-re-use tlit-orient elsewhere, verify once with:
+measured physically on the ThinkPad X12 (DEVELOPMENT.md Phase 6). iio-sensor-
+proxy 3.9 does report an orientation on this board, but its generic axis
+convention does not match this accelerometer's mounting — the measured table
+below is the source of truth, and reading sysfs costs nothing.
+
+If you re-use tlit-orient elsewhere, verify once with:
   tlit-orient --watch        # tilt the device through all 4 postures
 
-Also prints the raw gravity vector so a calibration table can be derived.
+--watch is the mode the shell runs: it stays alive, prints a posture label per
+line only when the posture changes (after it has been stable for
+STABLE_SAMPLES reads), and exits non-zero if the sensor cannot be read so the
+caller can fall back.
+
+  tlit-orient               one human-readable line (label, g vector, |g|)
+  tlit-orient --json        {"g": [x, y, z], "label": "..."}
+  tlit-orient --watch       streaming labels, one per line, on change
 """
 
 import json
@@ -27,6 +38,8 @@ import time
 
 IIO = None                     # resolved by find_accel() — device numbers shift
 AXES = ("x", "y", "z")
+SAMPLE_INTERVAL = 0.2          # seconds between sysfs reads in --watch
+STABLE_SAMPLES = 2             # reads a new posture must hold before it is emitted
 
 
 def find_accel():
@@ -110,14 +123,27 @@ def main():
         g = read_vector()
         print(json.dumps({"g": list(g), "label": classify(g)}))
     elif args[0] == "--watch":
-        try:
-            while True:
-                g = read_vector()
-                print(f"\r{classify(g):<10} g=({g[0]:+.2f},{g[1]:+.2f},{g[2]:+.2f})     ",
-                      end="", flush=True)
-                time.sleep(0.2)
-        except KeyboardInterrupt:
-            print("\n(stopped)")
+        # Long-lived posture stream for the shell. Only changes are printed, so
+        # the caller does not have to dedupe, and a read failure ends the
+        # stream instead of spinning on a vanished sensor.
+        emitted = None
+        candidate = None
+        stable = 0
+        while True:
+            try:
+                label = classify(read_vector())
+            except (OSError, RuntimeError, ValueError) as exc:
+                print(f"tlit-orient: {exc}", file=sys.stderr, flush=True)
+                return 1
+            if label == candidate:
+                stable += 1
+            else:
+                candidate = label
+                stable = 1
+            if stable >= STABLE_SAMPLES and label != emitted:
+                emitted = label
+                print(label, flush=True)
+            time.sleep(SAMPLE_INTERVAL)
     else:
         print(__doc__)
         return 2
