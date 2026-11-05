@@ -24,8 +24,14 @@
   （voxtype、superwhisper…）、它的锁、以及把文字打进当前光标处（终端和各种
   toolkit 都支持中文）都归 Omarchy 管。本插件**不再自建任何听写管线**：没有
   后端探测、没有 state 文件轮询、没有 `voxtype record` 回退。没装或没选后端时
-  弹一条 OSD（设置 ▸ 默认 ▸ Dictation）。
+  弹一条 OSD（设置 ▸ 默认 ▸ Dictation）。浮层本身还是完整的语音键盘：
+  **Delete / Clear / Enter** 修正或提交这一行（Clear 认终端：终端里走 readline
+  `Ctrl+A`+`Ctrl+K`，其它窗口是全选删除），左侧 **← → ↑ ↓** 移光标，展开
+  **CLI keys** 网格可发送 `esc` `/` `tab` `⇧tab` `⌃C` `⌃D` `⌃J` `⌃T`，纯触屏
+  操作 pi / codex CLI 不用唤出键盘。
 - 语音和键盘**互斥**：打开一个会自动关掉另一个。
+- **CLI keys + 光标板只在语音模式显示** —— 和按住说话浮层一起出现；键盘打开时
+  自动隐藏。
 - **屏幕旋转** —— 状态栏只留**一个** **⟳** 按钮，点开是选择面板：
   **自动（传感器）**（默认）+ 0° / 90° / 180° / 270°（这四个角度就是四步
   90°，所以不再另设 ⟲/⟳ 两键）。`SUPER+SHIFT+R` 仍可不开面板直接步进。
@@ -49,16 +55,16 @@
 多点触控手势（底部上滑调键盘的守护进程已删——▼ 键、`SUPER+U` 和状态栏
 按钮已经够用）、SDDM 登录界面改动（锁屏已支持）。
 
-2.0.0 删掉的都是「这里本来就有」的重复：光标板 + **CLI keys** 网格（键盘自己
-就有 Esc / Tab / Ctrl / 方向键）、**Delete / Clear / Enter** 以及它的终端识别
-（键盘上有退格和回车）、听写后端探测和 state 轮询（`omarchy dictation` 已经有）。
+2.0.0 删掉的是「这里本来就有」的重复：听写后端探测和 state 轮询
+（`omarchy dictation` 已经有）。语音浮层自己的按键保留 —— 键盘上确实有
+Esc / Tab / Ctrl / 方向键，但那些键是为了「收起键盘只靠听写」时用的。
 
 ## 依赖
 
 - Omarchy 4.x（Quickshell）+ Hyprland 0.56+（Lua 配置 API），Arch 系。
 - 听写后端（Omarchy 4.5 的 `omarchy dictation` 已内置 voxtype 支持：AUR
-  `voxtype-bin`、`omarchy-install-dictation-voxtype`）。文字由后端自己打进光标，
-  所以插件不需要自己的 `wtype`。
+  `voxtype-bin`、`omarchy-install-dictation-voxtype`）。文字由后端打进光标；
+  浮层自己的按键需要 `wtype`。
 - 自动旋转需要 `python3` 和可读的 IIO 加速度计（`tlit-orient` 直读 sysfs，
   不需要额外的守护进程）。
 - 编译 wvkbd 需要 `cairo pango wayland libxkbcommon`（多数 Omarchy 装机已有）。
@@ -83,11 +89,12 @@ omarchy plugin add https://github.com/gmaxxxie/omarchy-tablet-experience-lite.gi
 | 参数 | 作用 |
 |---|---|
 | *(无)* | helper + wvkbd 构建 + `SUPER+U` 钩子 + voxtype 接线 |
+| `--no-packages` | 不调用 pacman（`wtype`） |
 | `--no-wvkbd` | 跳过构建（构建完成前键盘不可用） |
 | `--dry-run` | 只预览，不改任何东西 |
 | `--verify` | 安装后只读自检 |
 
-所有写入都在 `$HOME` 内，任何步骤都不需要 sudo。
+所有写入都在 `$HOME` 内，只有装 `wtype` 那一步需要 sudo。
 每个被修改的文件都会先备份成 `*.bak.<时间戳>`。
 
 **重载一次 shell**（或重新登录）让插件重新加载，然后运行
@@ -106,10 +113,13 @@ omarchy plugin add https://github.com/gmaxxxie/omarchy-tablet-experience-lite.gi
 | 锁屏键盘 | 锁屏自动升起；密码框右侧浮动 **⌨** 按钮可重调；**▼** 收起 |
 | 开/关语音浮层 | 状态栏 **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |
 | 说话输入 | 按住大麦克风，松开转写 |
+| 修正文本 | **Delete**（退格）/ **Clear**（全选删除；终端里是 readline `Ctrl+A`+`Ctrl+K`）/ **Enter** |
+| 移动光标 | 左侧 **← → ↑ ↓** |
+| Agent 按键（pi / codex） | **CLI keys ▲** → `esc` `/` `tab` `⇧tab` `⌃C` `⌃D` `⌃J` `⌃T` |
 
 IPC：`getState` · `voiceInputToggle|Show|Hide` ·
-`keyboardToggle|Show|Hide` · `rotationNext|rotationPrev` ·
-`setRotation <auto|0|1|2|3>` · `autoRotateToggle`
+`keyboardToggle|Show|Hide` · `cliKeysToggle` · `clearNow` ·
+`rotationNext|rotationPrev` · `setRotation <auto|0|1|2|3>` · `autoRotateToggle`
 （`omarchy-shell maxt.tablet-lite <method>`）。
 
 ## 卸载

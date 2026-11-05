@@ -29,8 +29,15 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   toolkit) stay Omarchy's business. This plugin adds **no dictation plumbing**:
   no backend probe, no state-file polling, no `voxtype record` fallback. When no
   backend is installed or selected, one OSD line says so
-  (Setup ▸ Defaults ▸ Dictation).
+  (Setup ▸ Defaults ▸ Dictation). The overlay is still the full voice pad:
+  **Delete / Clear / Enter** fix or submit the dictated line, the left-side
+  **← → ↑ ↓** pad moves the caret through it, and the expandable **CLI keys**
+  grid sends `esc` `/` `tab` `⇧tab` `⌃C` `⌃D` `⌃J` `⌃T` for pi / codex CLI on a
+  touch-only screen — no keyboard needed. Clear is terminal-aware (readline
+  `Ctrl+A`+`Ctrl+K` in a terminal, select-all+delete elsewhere).
 - Voice and keyboard are **mutually exclusive**: opening one closes the other.
+- **CLI keys + caret pad are voice-mode only** — they appear with the
+  hold-to-talk overlay, where there is no keyboard, and fold away with it.
 - **Rotation** — **one** bar button (**⟳**) opens a picker: **Auto (sensor)**,
   the default, plus 0° / 90° / 180° / 270° — the four angles are the four 90°
   steps, so no second pair of ⟲/⟳ buttons. `SUPER+SHIFT+R` still steps the
@@ -61,18 +68,18 @@ handwriting, window management, bar decluttering, multi-touch gestures (the
 touch-swipe keyboard daemon is gone — the keyboard's ▼ key, `SUPER+U` and the
 bar button cover it), SDDM greeter changes (the lock screen is supported).
 
-Removed in 2.0.0 because they duplicated something that already existed here:
-the caret pad and the **CLI keys** grid (the on-screen keyboard carries Esc /
-Tab / Ctrl / arrows itself), **Delete / Clear / Enter** with its terminal-class
-detection (the keyboard has Backspace and Return), and the dictation
-backend/state plumbing (Omarchy owns `omarchy dictation`).
+Removed in 2.0.0 because it duplicated something that already existed here:
+the dictation backend/state plumbing (Omarchy owns `omarchy dictation`, its
+lock and its typing). The voice pad's own keys stay: the keyboard does carry
+Esc / Tab / Ctrl / arrows, but the pad is for when you are dictating with the
+keyboard folded away.
 
 ## Requirements
 
 - Omarchy 4.x (Quickshell shell) + Hyprland 0.56+ (Lua config API), Arch-based.
 - A dictation backend (Omarchy 4.5's `omarchy dictation` ships voxtype support:
   AUR `voxtype-bin`, `omarchy-install-dictation-voxtype`). The backend types the
-text itself, so the plugin needs no `wtype` of its own.
+  text at the cursor; the voice pad's own keys need `wtype`.
 - Build deps for the wvkbd build (`cairo pango wayland libxkbcommon`; already
   present on most Omarchy installs).
 - A touchscreen helps, but nothing is hardware-specific: the keyboard and voice
@@ -97,12 +104,13 @@ It also works from a dev clone.
 | Flag | Effect |
 |---|---|
 | *(none)* | helpers + wvkbd build + `SUPER+U` hook + voxtype wiring |
+| `--no-packages` | never invoke pacman (`wtype`) |
 | `--no-wvkbd` | skip the build (the keyboard stays unavailable until built) |
 | `--dry-run` | preview everything, change nothing |
 | `--verify` | post-install self-check (read-only) |
 
-Nothing outside `$HOME` is written and no step needs sudo. Every modified file
-gets a `*.bak.<timestamp>` first.
+Nothing outside `$HOME` is written; only the `wtype` install needs sudo. Every
+modified file gets a `*.bak.<timestamp>` first.
 
 **Reload the shell once** (or re-login) so the plugin loads fresh, then
 `install.sh --verify`.
@@ -120,15 +128,19 @@ gets a `*.bak.<timestamp>` first.
 | Lock screen keyboard | raises automatically on lock; floating **⌨** button right of the password field; **▼** folds it |
 | Open/close voice input | bar **🎤** · `omarchy-shell maxt.tablet-lite voiceInputToggle` |
 | Dictate | press & hold the big mic, release to transcribe |
+| Fix the text | **Delete** (BackSpace) / **Clear** (select-all+delete; readline `Ctrl+A`+`Ctrl+K` in terminals) / **Enter** |
+| Move the caret | the left-side **← → ↑ ↓** pad |
+| Agent keys (pi / codex) | **CLI keys ▲** → `esc` `/` `tab` `⇧tab` `⌃C` `⌃D` `⌃J` `⌃T` |
 
 IPC: `getState` · `voiceInputToggle|Show|Hide` · `keyboardToggle|Show|Hide` ·
-`rotationNext|rotationPrev` · `setRotation <auto|0|1|2|3>` · `autoRotateToggle`
+`cliKeysToggle` · `clearNow` · `rotationNext|rotationPrev` ·
+`setRotation <auto|0|1|2|3>` · `autoRotateToggle`
 (`omarchy-shell maxt.tablet-lite <method>`).
 
 ## Files
 
 ```
-Service.qml             QML service: voice overlay, VK state, rotation
+Service.qml             QML service: voice pad (mic + caret/CLI keys), VK state, rotation
 BarWidget.qml           bar buttons: ⌨ keyboard + 🎤 voice + ⟳ rotation
 scripts/tlit-vk         keyboard toggle/show/hide (wvkbd only)
 scripts/tlit-install-wvkbd  user-local wvkbd-deskintl build (pinned v0.21 + SHA-256)

@@ -21,11 +21,12 @@
 #      mousehop release hook right before typing
 #
 # Everything is reversible: modified files get *.bak.<timestamp> backups and
-# uninstall.sh undoes every change. Nothing writes outside $HOME, and no step
-# needs sudo.
+# uninstall.sh undoes every change. Nothing writes outside $HOME, and only the
+# wtype install needs sudo (skip it with --no-packages).
 #
 # Usage:
 #   ./install.sh                 install scripts + hooks + wvkbd build
+#   ./install.sh --no-packages   never invoke pacman (wtype)
 #   ./install.sh --no-wvkbd      skip the wvkbd build (keyboard unavailable until built)
 #   ./install.sh --dry-run       preview only, change nothing
 #   ./install.sh --verify        post-install self-check (read-only)
@@ -36,15 +37,17 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 HYPR_DIR="${HYPR_DIR:-$HOME/.config/hypr}"
 DRY_RUN=0
+DO_PACKAGES=1
 BUILD_WVKBD=1
 VERIFY=0
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run)     DRY_RUN=1 ;;
+    --no-packages) DO_PACKAGES=0 ;;
     --no-wvkbd)    BUILD_WVKBD=0 ;;
     --verify)      VERIFY=1 ;;
-    -h|--help)     sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)     sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $arg (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -165,10 +168,24 @@ fi
 
 [ "$DRY_RUN" -eq 1 ] && log "DRY RUN — nothing will be changed"
 
-# No package step: nothing here needs one. The keyboard is the user-local
-# wvkbd build, the dictation backend is Omarchy's (voxtype is AUR-only and is
-# reported, not installed silently), and the plugin no longer types anything
-# itself now that Omarchy's dictation does.
+# --------------------------------------------------------------- packages
+# wtype is the only package the lite feature set needs: it sends the voice
+# pad's Delete / Clear / Enter, the caret arrows and the CLI keys. The keyboard
+# is the user-local wvkbd build, and the dictation backend is AUR-only and is
+# reported rather than installed silently.
+if [ "$DO_PACKAGES" -eq 1 ] && command -v pacman >/dev/null 2>&1; then
+  REQUIRED=(wtype)
+  MISSING=()
+  for p in "${REQUIRED[@]}"; do
+    pacman -Q "$p" >/dev/null 2>&1 || MISSING+=("$p")
+  done
+  if [ "${#MISSING[@]}" -gt 0 ]; then
+    log "installing packages: ${MISSING[*]}"
+    run sudo pacman -S --needed --noconfirm "${MISSING[@]}"
+  else
+    ok "packages present: ${REQUIRED[*]}"
+  fi
+fi
 
 # ---------------------------------------------------------- helper scripts
 log "installing helper scripts -> $BIN_DIR"

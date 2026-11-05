@@ -17,9 +17,10 @@ import qs.Commons
 //     `omarchy theme color --all`, and the lock state is
 //     `omarchy-shell lock status`.
 // Removed on purpose (they were duplication): the voxtype state-file poller and
-// dictation-backend probe, the caret pad and the "CLI keys" grid (the on-screen
-// keyboard already carries Esc / Tab / Ctrl / arrows), and Delete / Clear /
-// Enter with its terminal-class detection.
+// dictation-backend probe (Omarchy owns the backend, its lock and the typing).
+// The voice pad itself keeps its own keys — Delete / Clear / Enter, the caret
+// arrows and the "CLI keys" grid — because they are what makes dictation
+// usable on a touch-only screen without raising the keyboard.
 //
 // Rotation: the bar's ⟳ button opens a picker — auto (sensor, the default) and
 // 0° / 90° / 180° / 270°; SUPER+SHIFT+R steps 90°. Every rotation preserves the
@@ -39,6 +40,7 @@ import qs.Commons
 // IPC (omarchy-shell maxt.tablet-lite <method>):
 //   getState | voiceInputToggle | voiceInputShow | voiceInputHide
 //   keyboardToggle | keyboardShow | keyboardHide
+//   cliKeysToggle | clearNow
 //   rotationNext | rotationPrev | setRotation <auto|0|1|2|3> | autoRotateToggle
 Item {
   id: root
@@ -46,7 +48,7 @@ Item {
   Component.onCompleted: console.log("tablet-lite Service LOADED v" + root.pluginVersion)
 
   property var shell: null
-  readonly property string pluginVersion: "2.0.0"
+  readonly property string pluginVersion: "2.0.1"
 
   // ---- labels -------------------------------------------------------------
   // The shell's language (~/.config/omarchy/language, which omarchy exposes as
@@ -74,7 +76,11 @@ Item {
     "voice.hold": "Hold to talk",
     "voice.release": "Release to finish",
     "voice.transcribing": "Transcribing…",
-    "voice.noBackend": "No dictation backend — Setup ▸ Defaults ▸ Dictation"
+    "voice.noBackend": "No dictation backend — Setup ▸ Defaults ▸ Dictation",
+    "action.delete": "Delete",
+    "action.clear": "Clear",
+    "action.enter": "Enter",
+    "cli.keys": "CLI keys"
   })
   readonly property var zhLabels: ({
     "vk.tip.up": "键盘已打开 — 点此收起 (Super+U)",
@@ -97,7 +103,11 @@ Item {
     "voice.hold": "按住说话",
     "voice.release": "松开结束",
     "voice.transcribing": "转写中…",
-    "voice.noBackend": "没有听写后端 — 设置 ▸ 默认 ▸ Dictation"
+    "voice.noBackend": "没有听写后端 — 设置 ▸ 默认 ▸ Dictation",
+    "action.delete": "删除",
+    "action.clear": "清空",
+    "action.enter": "回车",
+    "cli.keys": "CLI 按键"
   })
 
   function t(key) {
@@ -121,6 +131,8 @@ Item {
   property bool voiceInputOpen: false
   property bool holding: false
   property bool busy: false
+  // The expandable "CLI keys" grid lives in the voice pad (bottom-left).
+  property bool cliKeysOpen: false
   // One dictation command at a time: a release that arrives while `start` is
   // still running is queued instead of overwriting the command.
   property string vxAction: ""
@@ -225,7 +237,51 @@ Item {
 
   property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || ""
 
+  // Hyprland window classes of terminal emulators (compared case-insensitively,
+  // anchored): Clear must send readline Ctrl+A + Ctrl+K there, not a GUI
+  // select-all + BackSpace. Anchored on purpose — a substring test would let
+  // `st` catch `systemsettings`.
+  readonly property var terminalClasses: [
+    "foot", "alacritty", "kitty", "ghostty", "com.mitchellh.ghostty",
+    "wezterm", "org.wezfurlong.wezterm", "konsole", "gnome-terminal",
+    "gnome-terminal-server", "kgx", "org.gnome.console", "ptyxis",
+    "xterm", "urxvt", "rxvt", "termite", "tilix", "xfce4-terminal",
+    "mate-terminal", "lxterminal", "qterminal", "sakura", "st",
+    "st-256color", "warp-terminal", "dev.warp.warp", "tabby", "hyper",
+    "contour", "rio", "blackbox", "com.raggesilver.blackbox"
+  ]
+
+  // Extra control keys for the pad — what a TUI agent (pi / codex CLI) or a
+  // shell prompt needs from touch, which the 4 caret arrows cannot provide.
+  // `label` is the literal key sent; `argv` is appended to `wtype`.
+  readonly property var cliKeys: [
+    { label: "esc",  argv: ["-k", "Escape"] },
+    { label: "/",    argv: ["-k", "slash"] },
+    { label: "tab",  argv: ["-k", "Tab"] },
+    { label: "\u21E7tab", argv: ["-M", "shift", "-k", "Tab", "-m", "shift"] },
+    { label: "\u2303C",  argv: ["-M", "ctrl", "-k", "c", "-m", "ctrl"] },
+    { label: "\u2303D",  argv: ["-M", "ctrl", "-k", "d", "-m", "ctrl"] },
+    { label: "\u2303J",  argv: ["-M", "ctrl", "-k", "j", "-m", "ctrl"] },
+    { label: "\u2303T",  argv: ["-M", "ctrl", "-k", "t", "-m", "ctrl"] }
+  ]
+
   // ------------------------------------------------------------- actions
+
+  // Clear first asks Hyprland which window owns the keyboard, because the
+  // sequence differs between a terminal and a GUI toolkit.
+  BoundedProcess {
+    id: clearWinProbe
+    command: ["hyprctl", "activewindow", "-j"]
+    onStreamFinished: {
+      var cls = ""
+      try { cls = String((JSON.parse(output || "{}") || {}).class || "") } catch (e) {}
+      var cmd = root.isTerminalClass(cls)
+        ? ["wtype", "-M", "ctrl", "-k", "a", "-k", "k", "-m", "ctrl"]
+        : ["wtype", "-M", "ctrl", "-k", "a", "-m", "ctrl", "-k", "BackSpace"]
+      clrCmd.command = cmd
+      clrCmd.running = true
+    }
+  }
 
   // Dictation, exactly as Omarchy runs it: the backend choice, its lock and
   // the typing (wtype via the backend) all belong to `omarchy dictation`.
@@ -249,6 +305,11 @@ Item {
 
   BoundedProcess { id: vkCmd }
   BoundedProcess { id: mousehopCmd }
+  BoundedProcess { id: enterCmd }
+  BoundedProcess { id: delCmd }
+  BoundedProcess { id: clrCmd }
+  BoundedProcess { id: arrowCmd }
+  BoundedProcess { id: cliCmd }
   BoundedProcess {
     id: rotateCmd
     deadlineMs: 8000
@@ -403,6 +464,7 @@ Item {
     // can get lost with it.
     if (root.holding) root.stopRecording()
     root.voiceInputOpen = false
+    root.cliKeysOpen = false
   }
 
   function runDictation(action) {
@@ -431,6 +493,47 @@ Item {
   function stopRecording() {
     root.holding = false
     root.runDictation("stop")
+  }
+
+  // The voice pad's own keys: the text the backend typed lands at the cursor,
+  // and on a touch-only screen these are how it is fixed or submitted without
+  // raising the keyboard first.
+  function sendEnter() {
+    enterCmd.command = ["wtype", "-k", "Return"]
+    enterCmd.running = true
+  }
+
+  function deleteLastChar() {
+    delCmd.command = ["wtype", "-k", "BackSpace"]
+    delCmd.running = true
+  }
+
+  function isTerminalClass(cls) {
+    return root.terminalClasses.indexOf(String(cls || "").toLowerCase()) !== -1
+  }
+
+  // Clear the whole input. A terminal gets Ctrl+A + Ctrl+K (readline
+  // beginning-of-line + kill-line); anything else gets Ctrl+A + BackSpace
+  // (select-all + delete). Ask Hyprland which window owns the keyboard first;
+  // on any probe failure the GUI sequence is the safe default (Ctrl+K in a
+  // browser is the search bar, not kill-line).
+  function clearInput() {
+    if (clearWinProbe.running) return
+    clearWinProbe.running = true
+  }
+
+  function sendArrow(dir) {
+    arrowCmd.command = ["wtype", "-k", dir]
+    arrowCmd.running = true
+  }
+
+  // Copy argv element by element (QML may hand a model's nested array back as
+  // a QVariantList, which concat would splice in as one element).
+  function sendCliKey(argv) {
+    var cmd = ["wtype"]
+    for (var i = 0; i < argv.length; i++) cmd.push(String(argv[i]))
+    cliCmd.command = cmd
+    cliCmd.running = true
   }
 
   // ---- virtual keyboard --------------------------------------------------
@@ -474,6 +577,7 @@ Item {
     var changed = vis !== root.vkVisible
     root.vkVisible = vis
     if (changed && vis && root.voiceInputOpen) root.hideVoiceInput()
+    if (changed && !vis) root.cliKeysOpen = false
   }
 
   function onVkState(out) {
@@ -698,8 +802,8 @@ Item {
 
         anchors { bottom: true; right: true }
         margins { bottom: 28; right: 28 }
-        implicitWidth: 200
-        implicitHeight: 176
+        implicitWidth: 240
+        implicitHeight: 230
 
         Column {
           anchors.centerIn: parent
@@ -767,11 +871,225 @@ Item {
               onCanceled: root.stopRecording()
             }
           }
+
+          // Delete · Clear · Enter — fix or send the just-dictated text.
+          Row {
+            id: actionRow
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: 232
+            spacing: 8
+
+            Rectangle {
+              width: (actionRow.width - actionRow.spacing * 2) / 3
+              height: 44
+              radius: 12
+              color: Util.alpha(Color.accent, 0.12)
+              border.width: 1
+              border.color: Util.alpha(Color.foreground, 0.3)
+              Text {
+                anchors.centerIn: parent
+                text: root.t("action.delete")
+                color: Color.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+              }
+              TapHandler { onTapped: root.deleteLastChar() }
+            }
+
+            Rectangle {
+              width: (actionRow.width - actionRow.spacing * 2) / 3
+              height: 44
+              radius: 12
+              color: Util.alpha(Color.accent, 0.12)
+              border.width: 1
+              border.color: Util.alpha(Color.foreground, 0.3)
+              Text {
+                anchors.centerIn: parent
+                text: root.t("action.clear")
+                color: Color.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+              }
+              TapHandler { onTapped: root.clearInput() }
+            }
+
+            Rectangle {
+              width: (actionRow.width - actionRow.spacing * 2) / 3
+              height: 44
+              radius: 12
+              color: Util.alpha(Color.accent, 0.12)
+              border.width: 1
+              border.color: Util.alpha(Color.foreground, 0.3)
+              Text {
+                anchors.centerIn: parent
+                text: root.t("action.enter")
+                color: Color.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
+              TapHandler { onTapped: root.sendEnter() }
+            }
+          }
         }
 
         // If the surface goes away mid-press (bar reload / shell reload),
         // never strand a recording.
         Component.onDestruction: if (root.holding) root.stopRecording()
+      }
+    }
+  }
+
+  // --------------------------------------- caret + CLI key pad (bottom-left)
+  // Voice-mode only: with the on-screen keyboard up, the keyboard already
+  // carries Esc / Tab / Ctrl / arrows, so the pad would just cover content
+  // above it. Bottom margin 40 == the voice bar's button row.
+  Variants {
+    model: Quickshell.screens
+    delegate: Component {
+      PanelWindow {
+        id: dirPad
+        required property var modelData
+        screen: modelData
+        visible: !root.locked && root.voiceInputOpen
+        color: "transparent"
+        WlrLayershell.namespace: "maxt-tablet-dirpad"
+        WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+        exclusionMode: ExclusionMode.Ignore
+
+        anchors { bottom: true; left: true }
+        margins { bottom: 40; left: 28 }
+        implicitWidth: 232
+        // Collapsed = toggle bar + caret arrows (32 + 8 + 44 = 84).
+        // Expanded adds the 4x2 CLI grid above the bar (96 + 8 + 32 + 8 + 44).
+        implicitHeight: root.cliKeysOpen ? 188 : 84
+
+        Column {
+          anchors.centerIn: parent
+          spacing: 8
+
+          // Agent control keys (pi / codex CLI) — only while expanded.
+          Grid {
+            visible: root.cliKeysOpen
+            columns: 4
+            spacing: 8
+            width: 232
+
+            Repeater {
+              model: root.cliKeys
+              delegate: Rectangle {
+                id: cliKey
+                required property var modelData
+                width: 52
+                height: 44
+                radius: 12
+                color: Util.alpha(Color.accent, 0.12)
+                border.width: 1
+                border.color: Util.alpha(Color.foreground, 0.3)
+                Text {
+                  anchors.centerIn: parent
+                  text: cliKey.modelData.label
+                  color: Color.foreground
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                }
+                TapHandler { onTapped: root.sendCliKey(cliKey.modelData.argv) }
+              }
+            }
+          }
+
+          // Toggle bar. The chevron points the way the grid appears (up).
+          Row {
+            spacing: 8
+
+            Rectangle {
+              width: 232
+              height: 32
+              radius: 12
+              color: Util.alpha(Color.accent, 0.08)
+              border.width: 1
+              border.color: Util.alpha(Color.foreground, 0.22)
+              Text {
+                anchors.centerIn: parent
+                text: root.t("cli.keys") + (root.cliKeysOpen ? "  \u25BC" : "  \u25B2")
+                color: Util.alpha(Color.foreground, 0.85)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              TapHandler { onTapped: root.cliKeysOpen = !root.cliKeysOpen }
+            }
+          }
+
+          Row {
+            spacing: 8
+
+            Rectangle {
+              width: 52
+              height: 44
+              radius: 12
+              color: Util.alpha(Color.accent, 0.12)
+              border.width: 1
+              border.color: Util.alpha(Color.foreground, 0.3)
+              Text {
+                anchors.centerIn: parent
+                text: "\u2190"
+                color: Color.foreground
+                font.family: Style.font.family
+                font.pixelSize: 22
+              }
+              TapHandler { onTapped: root.sendArrow("Left") }
+            }
+            Rectangle {
+              width: 52
+              height: 44
+              radius: 12
+              color: Util.alpha(Color.accent, 0.12)
+              border.width: 1
+              border.color: Util.alpha(Color.foreground, 0.3)
+              Text {
+                anchors.centerIn: parent
+                text: "\u2192"
+                color: Color.foreground
+                font.family: Style.font.family
+                font.pixelSize: 22
+              }
+              TapHandler { onTapped: root.sendArrow("Right") }
+            }
+            Rectangle {
+              width: 52
+              height: 44
+              radius: 12
+              color: Util.alpha(Color.accent, 0.12)
+              border.width: 1
+              border.color: Util.alpha(Color.foreground, 0.3)
+              Text {
+                anchors.centerIn: parent
+                text: "\u2191"
+                color: Color.foreground
+                font.family: Style.font.family
+                font.pixelSize: 22
+              }
+              TapHandler { onTapped: root.sendArrow("Up") }
+            }
+            Rectangle {
+              width: 52
+              height: 44
+              radius: 12
+              color: Util.alpha(Color.accent, 0.12)
+              border.width: 1
+              border.color: Util.alpha(Color.foreground, 0.3)
+              Text {
+                anchors.centerIn: parent
+                text: "\u2193"
+                color: Color.foreground
+                font.family: Style.font.family
+                font.pixelSize: 22
+              }
+              TapHandler { onTapped: root.sendArrow("Down") }
+            }
+          }
+        }
       }
     }
   }
@@ -839,6 +1157,7 @@ Item {
     function getState(): string {
       return JSON.stringify({
         voiceInputOpen: root.voiceInputOpen,
+        cliKeysOpen: root.cliKeysOpen,
         voiceHolding: root.holding,
         voiceBusy: root.busy,
         vkVisible: root.vkVisible,
@@ -870,6 +1189,16 @@ Item {
     function voiceInputHide(): string {
       root.hideVoiceInput()
       return "closed"
+    }
+
+    function cliKeysToggle(): string {
+      root.cliKeysOpen = !root.cliKeysOpen
+      return root.cliKeysOpen ? "open" : "closed"
+    }
+
+    function clearNow(): string {
+      root.clearInput()
+      return "ok"
     }
 
     function keyboardToggle(): string {
