@@ -186,12 +186,22 @@ if [ "$CLEAN_LEGACY" -eq 1 ]; then
   log "cleaning leftovers of the superseded full plugin / pre-1.5 lite install"
   freed_before="$(du -scm "$HOME/.local/share/texp-ink" 2>/dev/null | tail -1 | cut -f1)"
 
+  # Dry-run prints "would remove"; the real run removes and says so once.
+  remove_path() { # $1 path, $2 label (defaults to the path)
+    local p="$1" label="${2:-$1}"
+    [ -e "$p" ] || return 0
+    if [ "$DRY_RUN" -eq 1 ]; then
+      printf '    would remove: %s\n' "$p"
+    else
+      rm -rf -- "$p" && log "removed $label"
+    fi
+  }
+
   # Helpers that only the full plugin ever used.
   for s in texp-ink texp-ink-key texp-touch texp-window texp-close \
            texp-bar-probe texp-hw-laptop-closed texp-kbdetect \
            texp-sddm-vk texp-priv-install; do
-    [ -e "$BIN_DIR/$s" ] || continue
-    run rm -f "$BIN_DIR/$s" && log "removed $BIN_DIR/$s"
+    remove_path "$BIN_DIR/$s"
   done
 
   # The pre-1.5 lite helpers (now tlit-*). Shared names with the full plugin,
@@ -201,22 +211,18 @@ if [ "$CLEAN_LEGACY" -eq 1 ]; then
   else
     for s in texp-vk texp-orient texp-rotate texp-mousehop texp-vtext \
              texp-voxtype-wire texp-install-wvkbd; do
-      [ -e "$BIN_DIR/$s" ] || continue
-      run rm -f "$BIN_DIR/$s" && log "removed stale helper $BIN_DIR/$s"
+      remove_path "$BIN_DIR/$s" "stale helper $BIN_DIR/$s"
     done
   fi
 
   # Handwriting recognition models (offline PP-OCRv6, ~90 MB).
-  if [ -d "$HOME/.local/share/texp-ink" ]; then
-    run rm -rf "$HOME/.local/share/texp-ink"
-    log "removed $HOME/.local/share/texp-ink (${freed_before:-?} MB of handwriting models)"
-  fi
+  remove_path "$HOME/.local/share/texp-ink" \
+    "$HOME/.local/share/texp-ink (${freed_before:-?} MB of handwriting models)"
 
   # The full plugin's Hyprland hook, disabled when lite took over.
   for f in "$HYPR_DIR/tablet-experience.lua" \
            "$HYPR_DIR/tablet-experience.lua.disabled-lite"; do
-    [ -e "$f" ] || continue
-    run rm -f "$f" && log "removed $f"
+    remove_path "$f"
   done
 
   log "legacy cleanup done"
