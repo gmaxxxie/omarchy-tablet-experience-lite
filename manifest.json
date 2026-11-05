@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "maxt.tablet-lite",
   "name": "Tablet Lite",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "author": "maxt",
   "license": "MIT",
-  "description": "The simplified tablet experience: virtual keyboard, voice input, rotation and one rotation picker. On-screen wvkbd keyboard (Ctrl/Super/Alt, F-keys, number row, arrows, a ▼ collapse key), voxtype/omarchy-dictation hold-to-talk with Delete/Clear/Enter, a caret pad and a CLI-keys grid, plus ONE bar button whose picker offers auto-rotate (default) and 0°/90°/180°/270°/step rotation (scale and touch calibration preserved), and a lock-screen keyboard with a floating re-invoke button.",
+  "description": "The tablet core, nothing else: the on-screen keyboard (wvkbd-deskintl with a visible ▼ collapse key, also on the lock screen), a hold-to-talk button for Omarchy's own dictation (omarchy dictation), and screen rotation — auto (sensor) by default plus fixed 0°/90°/180°/270°, with the touch calibration matrix kept in step. Everything Omarchy 4.5 already provides (dictation backends and their lock, the OSD, the theme colors, the lock state) is used as-is instead of being re-implemented.",
   "kinds": [
     "service",
     "bar-widget"
@@ -15,8 +15,8 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Tablet lite: keyboard + voice + rotation picker",
-    "description": "On-screen keyboard toggle + voice input + ONE rotation button opening a picker (auto default, 0°/90°/180°/270°, ⟲ ⟳ steps); folds into one popup button in portrait",
+    "displayName": "Tablet lite: keyboard + voice + rotation",
+    "description": "On-screen keyboard toggle + hold-to-talk for omarchy dictation + ONE rotation button opening a picker (auto default, 0°/90°/180°/270°); folds into one popup button in portrait",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"

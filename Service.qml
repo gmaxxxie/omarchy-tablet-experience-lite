@@ -4,36 +4,34 @@ import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 
-// Tablet Lite — the simplified tablet experience: virtual keyboard, voice
-// input and screen rotation. No laptop/tablet state machine, no handwriting,
-// no window manager, no bar declutter.
+// Tablet Lite — only what a touch tablet needs and Omarchy does not already
+// provide: an on-screen keyboard (including on the lock screen), a touch
+// trigger for Omarchy's own dictation, and screen rotation.
 //
-// Rotation: the bar's rotate icon and SUPER+SHIFT+R step the display through
-// 0° / 90° / 180° / 270°; right-clicking the icon (or the IPC method) turns on
-// sensor-following auto-rotate via `tlit-orient` (sysfs accelerometer). Every
-// rotation preserves the monitor scale and keeps the touch calibration matrix
-// in step (tlit-rotate). The last angle is persisted, so a shell restart does
-// not silently put the screen back to landscape.
+// Everything Omarchy 4.5 already owns is used, not re-implemented:
+//   * dictation is `omarchy dictation start|stop` — the same commands the
+//     ALT+SPACE / Alt_R hotkeys run, so the backend (voxtype, superwhisper, …)
+//     and its lock stay Omarchy's business. This plugin adds nothing but the
+//     hold-to-talk button; the text is typed by the backend at the cursor.
+//   * the rotation OSD is `omarchy osd`, the keyboard theme comes from
+//     `omarchy theme color --all`, and the lock state is
+//     `omarchy-shell lock status`.
+// Removed on purpose (they were duplication): the voxtype state-file poller and
+// dictation-backend probe, the caret pad and the "CLI keys" grid (the on-screen
+// keyboard already carries Esc / Tab / Ctrl / arrows), and Delete / Clear /
+// Enter with its terminal-class detection.
 //
-// Voice input: the bar's mic icon opens a bottom hold-to-talk button.
-// Press & hold -> `omarchy dictation start`, release -> `omarchy dictation
-// stop` (falling back to `voxtype record ...` when no backend is configured):
-// omarchy 4.5 owns the backend choice (voxtype, superwhisper, ...) and the
-// same commands the ALT+SPACE / Alt_R / F9 hotkeys use, so the touch button
-// and the keyboard cannot drift apart. The backend transcribes locally and
-// types the text at the cursor with wtype (CJK works everywhere). Delete /
-// Clear / Enter fix or submit the dictated line, the left-side caret pad
-// moves through it, and the expandable "CLI keys" grid sends esc / / / tab /
-// ⇧tab / ⌃C / ⌃D / ⌃J / ⌃T for pi / codex CLI on a touch-only screen. The pad
-// is voice-mode only — with the keyboard up, the keyboard itself carries
-// those keys. The overlay follows voxtype's state file when voxtype is the
-// backend, so the visuals agree with the F9 / SUPER+CTRL+X hotkeys too.
+// Rotation: the bar's ⟳ button opens a picker — auto (sensor, the default) and
+// 0° / 90° / 180° / 270°; SUPER+SHIFT+R steps 90°. Every rotation preserves the
+// monitor scale and keeps the touch calibration matrix in step
+// (`tlit-rotate`), the sensor is read by one long-lived `tlit-orient --watch`,
+// and the chosen angle / auto flag live in `tlit-state` so a shell restart
+// keeps them.
 //
 // Virtual keyboard: `tlit-vk` drives wvkbd-deskintl (a wlroots-native build
-// with Ctrl/Super/Alt, F-keys, a number row and arrows). Controllable from
-// the bar icon, SUPER+U, or `omarchy-shell maxt.tablet-lite keyboardToggle`.
-// Visibility is read from `hyprctl layers`, so the keyboard's own ▼ collapse
-// key is reflected immediately.
+// with Ctrl/Super/Alt, F-keys, a number row, arrows and a ▼ collapse key).
+// Visibility is read from `hyprctl layers` and from Hyprland's openlayer /
+// closelayer events, so the ▼ key is reflected immediately.
 //
 // Voice input and the keyboard are mutually exclusive: opening one closes the
 // other.
@@ -41,19 +39,14 @@ import qs.Commons
 // IPC (omarchy-shell maxt.tablet-lite <method>):
 //   getState | voiceInputToggle | voiceInputShow | voiceInputHide
 //   keyboardToggle | keyboardShow | keyboardHide
-//   cliKeysToggle | clearNow
-//   rotationNext | rotateLeft | rotateRight | setRotation <auto|0|1|2|3>
-//   autoRotateToggle | setAutoOrient <on|off>
+//   rotationNext | rotationPrev | setRotation <auto|0|1|2|3> | autoRotateToggle
 Item {
   id: root
 
-  Component.onCompleted: {
-    console.log("tablet-lite Service LOADED v" + root.pluginVersion)
-    root.probeDictation()
-  }
+  Component.onCompleted: console.log("tablet-lite Service LOADED v" + root.pluginVersion)
 
   property var shell: null
-  readonly property string pluginVersion: "1.9.0"
+  readonly property string pluginVersion: "2.0.0"
 
   // ---- labels -------------------------------------------------------------
   // The shell's language (~/.config/omarchy/language, which omarchy exposes as
@@ -75,19 +68,13 @@ Item {
     "popup.voice.up": "Voice (open)",
     "rotate.header": "Rotation",
     "rotate.auto": "Auto (sensor)",
-    "rotate.prev": "90° ⟲",
-    "rotate.next": "90° ⟳",
     "osd.rotate": "Rotate: %1",
     "osd.auto.on": "Auto-rotate: on (sensor)",
     "osd.auto.off": "Auto-rotate: off",
     "voice.hold": "Hold to talk",
     "voice.release": "Release to finish",
     "voice.transcribing": "Transcribing…",
-    "voice.down": "Dictation not running",
-    "action.delete": "Delete",
-    "action.clear": "Clear",
-    "action.enter": "Enter",
-    "cli.keys": "CLI keys"
+    "voice.noBackend": "No dictation backend — Setup ▸ Defaults ▸ Dictation"
   })
   readonly property var zhLabels: ({
     "vk.tip.up": "键盘已打开 — 点此收起 (Super+U)",
@@ -104,19 +91,13 @@ Item {
     "popup.voice.up": "语音输入（已打开）",
     "rotate.header": "屏幕旋转",
     "rotate.auto": "自动（传感器）",
-    "rotate.prev": "左转 90°",
-    "rotate.next": "右转 90°",
     "osd.rotate": "旋转：%1",
     "osd.auto.on": "自动旋转：开启（传感器）",
     "osd.auto.off": "自动旋转：关闭",
     "voice.hold": "按住说话",
     "voice.release": "松开结束",
     "voice.transcribing": "转写中…",
-    "voice.down": "听写服务未运行",
-    "action.delete": "删除",
-    "action.clear": "清空",
-    "action.enter": "回车",
-    "cli.keys": "CLI 按键"
+    "voice.noBackend": "没有听写后端 — 设置 ▸ 默认 ▸ Dictation"
   })
 
   function t(key) {
@@ -134,23 +115,19 @@ Item {
 
   // Voice input (hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing
-  //   holding         our button is pressed (authority for start/stop)
-  //   recording       backend state file says recording/streaming
-  //   transcribing    backend state file says transcribing/outputting
-  //   voxtypeUp       backend usable (state file readable, or a non-voxtype
-  //                   omarchy dictation backend is configured)
-  //   dictationBackend  `omarchy-default-dictation` output; empty = use the
-  //                   bare `voxtype record` path
+  //   holding         our button is pressed; start/stop follow this
+  //   busy            `omarchy dictation stop` is still running (the backend
+  //                   transcribes and types while it does)
   property bool voiceInputOpen: false
-  property bool cliKeysOpen: false
   property bool holding: false
-  property bool recording: false
-  property bool transcribing: false
-  property bool voxtypeUp: false
-  property string dictationBackend: ""
+  property bool busy: false
+  // One dictation command at a time: a release that arrives while `start` is
+  // still running is queued instead of overwriting the command.
+  property string vxAction: ""
+  property string vxQueued: ""
+  property bool vxRunning: false
 
-  // On-screen keyboard visibility (the CLI/caret pad is voice-mode only and
-  // deliberately does not float above the keyboard).
+  // On-screen keyboard visibility (wvkbd layer mapped).
   property bool vkVisible: false
 
   // Lock-screen keyboard. The Omarchy lock view is a Quickshell
@@ -168,13 +145,18 @@ Item {
   // off.
   property string rotation: ""
   property bool autoOrient: true
-  property bool prefsLoaded: false
   property var pendingPrefs: ({})
+  // A user action that lands before the state file finishes loading must win:
+  // the asynchronous onLoaded would otherwise overwrite it.
+  property bool prefsDirty: false
   readonly property string statePath: (Quickshell.env("XDG_STATE_HOME")
     || (Quickshell.env("HOME") + "/.local/state")) + "/tablet-lite/state"
   property string orientation: "unknown"
   property string appliedFor: ""
   property bool pendingRelative: false
+  // Our own in-flight flag: Process.running only turns true once the child has
+  // started, so two taps in one turn would overwrite each other's command.
+  property bool rotating: false
   property int liveTransform: 0
   // Live orientation from hyprctl (not the persisted preference), so the bar
   // folds in portrait even if the display was rotated outside this service.
@@ -192,11 +174,18 @@ Item {
     onLoaded: root.applyPrefs(text())
   }
 
-  // Writes are queued: two quick taps cannot drop one of them.
+  // Writes are queued: two quick taps cannot drop one of them. `writerBusy` is
+  // our own flag — Quickshell's Process reports `running` only once the child
+  // has actually started, so it cannot gate a second write in the same turn.
+  property bool writerBusy: false
+
   BoundedProcess {
     id: prefsWriter
     command: ["tlit-state", "set", "rotation", "0"]
-    onStreamFinished: root.flushPrefs()
+    onStreamFinished: {
+      root.writerBusy = false
+      root.flushPrefs()
+    }
   }
 
   function applyPrefs(raw) {
@@ -206,14 +195,16 @@ Item {
       var eq = lines[i].indexOf("=")
       if (eq > 0) values[lines[i].slice(0, eq).trim()] = lines[i].slice(eq + 1).trim()
     }
-    root.rotation = values.rotation || ""
-    root.autoOrient = values.auto === undefined ? true : values.auto === "on"
-    root.prefsLoaded = true
+    if (!root.prefsDirty) {
+      root.rotation = values.rotation || ""
+      root.autoOrient = values.auto === undefined ? true : values.auto === "on"
+    }
     root.initRotation()
   }
 
   function setPref(key, value) {
     var v = String(value)
+    root.prefsDirty = true
     if (key === "rotation") root.rotation = v
     else if (key === "auto") root.autoOrient = (v === "on")
     root.pendingPrefs[key] = v
@@ -221,63 +212,48 @@ Item {
   }
 
   function flushPrefs() {
-    if (prefsWriter.running) return
+    if (root.writerBusy) return
     var keys = Object.keys(root.pendingPrefs)
     if (keys.length === 0) return
     var key = keys[0]
     var value = root.pendingPrefs[key]
     delete root.pendingPrefs[key]
+    root.writerBusy = true
     prefsWriter.command = ["tlit-state", "set", key, value]
     prefsWriter.running = true
   }
 
-
   property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || ""
-  readonly property string voxtypeStateDir: root.runtimeDir + "/voxtype"
-  readonly property string voxtypeStateFile: root.voxtypeStateDir + "/state"
-
-  // Hyprland window classes of terminal emulators (compared case-insensitively,
-  // anchored): Clear must send readline Ctrl+A + Ctrl+K there, not a GUI
-  // select-all + BackSpace. Anchored on purpose — a substring test would let
-  // `st` catch `systemsettings`.
-  readonly property var terminalClasses: [
-    "foot", "alacritty", "kitty", "ghostty", "com.mitchellh.ghostty",
-    "wezterm", "org.wezfurlong.wezterm", "konsole", "gnome-terminal",
-    "gnome-terminal-server", "kgx", "org.gnome.console", "ptyxis",
-    "xterm", "urxvt", "rxvt", "termite", "tilix", "xfce4-terminal",
-    "mate-terminal", "lxterminal", "qterminal", "sakura", "st",
-    "st-256color", "warp-terminal", "dev.warp.warp", "tabby", "hyper",
-    "contour", "rio", "blackbox", "com.raggesilver.blackbox"
-  ]
-
-  // Extra control keys for the pad — what a TUI agent (pi / codex CLI) or a
-  // shell prompt needs from touch, which the 4 caret arrows cannot provide.
-  // `label` is the literal key sent; `argv` is appended to `wtype`.
-  readonly property var cliKeys: [
-    { label: "esc",  argv: ["-k", "Escape"] },
-    { label: "/",    argv: ["-k", "slash"] },
-    { label: "tab",  argv: ["-k", "Tab"] },
-    { label: "\u21E7tab", argv: ["-M", "shift", "-k", "Tab", "-m", "shift"] },
-    { label: "\u2303C",  argv: ["-M", "ctrl", "-k", "c", "-m", "ctrl"] },
-    { label: "\u2303D",  argv: ["-M", "ctrl", "-k", "d", "-m", "ctrl"] },
-    { label: "\u2303J",  argv: ["-M", "ctrl", "-k", "j", "-m", "ctrl"] },
-    { label: "\u2303T",  argv: ["-M", "ctrl", "-k", "t", "-m", "ctrl"] }
-  ]
 
   // ------------------------------------------------------------- actions
 
-  BoundedProcess { id: vxCmd }
-  BoundedProcess { id: enterCmd }
-  BoundedProcess { id: delCmd }
-  BoundedProcess { id: clrCmd }
-  BoundedProcess { id: arrowCmd }
-  BoundedProcess { id: cliCmd }
+  // Dictation, exactly as Omarchy runs it: the backend choice, its lock and
+  // the typing (wtype via the backend) all belong to `omarchy dictation`.
+  // A non-zero exit means no backend is selected/installed — say so once.
+  BoundedProcess {
+    id: vxCmd
+    deadlineMs: 15000
+    onStreamFinished: {
+      if (root.vxAction === "start" && vxCmd.exitCode !== 0)
+        root.osd("audio-input-microphone", root.t("voice.noBackend"))
+      root.vxAction = ""
+      root.busy = false
+      root.vxRunning = false
+      if (root.vxQueued !== "") {
+        var next = root.vxQueued
+        root.vxQueued = ""
+        root.runDictation(next)
+      }
+    }
+  }
+
   BoundedProcess { id: vkCmd }
   BoundedProcess { id: mousehopCmd }
   BoundedProcess {
     id: rotateCmd
     deadlineMs: 8000
     onStreamFinished: {
+      root.rotating = false
       // Relative steps print the resulting transform; persist it so the next
       // shell start restores the angle the user actually ended up at.
       if (root.pendingRelative) {
@@ -321,11 +297,12 @@ Item {
   // Apply one absolute transform. `silent` suppresses the tlit-rotate OSD
   // (used for startup restore and sensor-following); manual actions show it.
   function applyRotation(value, silent) {
-    if (rotateCmd.running) return false
+    if (root.rotating) return false
     var target = String(value || "0")
     if (root.rotationRing.indexOf(target) === -1) target = "0"
     // Always -s: tlit-rotate's own OSD is English-only, so the text is shown
     // here instead, in the shell's language.
+    root.rotating = true
     rotateCmd.command = ["tlit-rotate", "-s", target]
     rotateCmd.running = true
     root.setPref("rotation", target)
@@ -336,9 +313,10 @@ Item {
 
   // One 90° step from the CURRENT transform. `next` adds 1 (the content turns
   // clockwise, which is what you want when turning the device to the left);
-  // `prev` subtracts 1. The picker's ⟳ calls next and ⟲ calls prev.
+  // `prev` subtracts 1.
   function rotateStep(dir) {
-    if (rotateCmd.running) return
+    if (root.rotating) return
+    root.rotating = true
     root.setPref("auto", "off")
     root.appliedFor = ""
     root.pendingRelative = true
@@ -349,8 +327,8 @@ Item {
   function rotationNext() { root.rotateStep("next") }
   function rotationPrev() { root.rotateStep("prev") }
 
-  // Bar right-click / IPC: sensor-following on/off. Turning it off keeps the
-  // screen where the sensor last put it.
+  // Sensor-following on/off. Turning it off keeps the screen where the sensor
+  // last put it.
   function toggleAutoRotate() {
     root.setPref("auto", root.autoOrient ? "off" : "on")
     root.appliedFor = ""
@@ -397,10 +375,10 @@ Item {
 
   onAutoOrientChanged: root.ensureOrientationWatch()
 
-  // Runs once after the shell starts (PersistentProperties restore may be
-  // asynchronous): restore the last angle, or adopt the current one on first
-  // install. Auto mode starts the sensor reader instead.
+  // Runs once after the shell starts: restore the last angle, or adopt the
+  // current one on first install. Auto mode starts the sensor reader instead.
   function initRotation() {
+    if (root.prefsDirty) return   // a user action already chose the angle
     if (root.autoOrient) { root.ensureOrientationWatch(); return }
     if (root.rotation) root.applyRotation(root.rotation, true)
     else if (!transformProbe.running) transformProbe.running = true
@@ -416,8 +394,6 @@ Item {
   function showVoiceInput() {
     root.voiceInputOpen = true
     root.releaseMousehop()   // keys from this overlay must land here
-    root.probeDictation()    // a backend may have been configured since start
-    root.pollVoxtype()       // refresh daemon state the moment it appears
     // Voice input and the virtual keyboard are mutually exclusive.
     if (root.vkVisible) root.hideVk()
   }
@@ -425,77 +401,36 @@ Item {
   function hideVoiceInput() {
     // Never strand a recording when the button disappears — a lift-off event
     // can get lost with it.
-    if (root.holding || root.recording) root.stopRecording()
+    if (root.holding) root.stopRecording()
     root.voiceInputOpen = false
-    root.cliKeysOpen = false
   }
 
-  // Press = start recording; gated locally so a repeated press while already
-  // holding cannot double-start the backend. `omarchy dictation` when a
-  // backend is configured (it respects the user's voxtype/superwhisper choice
-  // and its lock), otherwise the voxtype-specific command.
-  function startRecording() {
-    if (root.holding || root.recording) return
-    root.holding = true
-    vxCmd.command = root.dictationBackend
-      ? ["omarchy", "dictation", "start"]
-      : ["voxtype", "record", "start"]
+  function runDictation(action) {
+    // `vxRunning` is ours, not Process.running: Quickshell flips that only
+    // once the child starts, so a press+release inside one turn would send
+    // only the stop.
+    if (root.vxRunning) { root.vxQueued = action; return }
+    root.vxRunning = true
+    root.vxAction = action
+    root.busy = (action === "stop")
+    vxCmd.command = ["omarchy", "dictation", action]
     vxCmd.running = true
   }
 
-  // Release = stop -> transcribe + type at the cursor. Sent unconditionally on
-  // our own release (harmless when idle) so a very fast tap that the state
-  // poll never saw still ends its recording.
+  // Press = start recording. Gated locally so a repeated press while already
+  // holding cannot double-start `omarchy dictation`.
+  function startRecording() {
+    if (root.holding) return
+    root.holding = true
+    root.runDictation("start")
+  }
+
+  // Release = stop -> transcribe + type at the cursor. Sent on our own release
+  // so a very fast tap that the backend never registered still ends cleanly
+  // (`omarchy dictation` ignores a stop when nothing is recording).
   function stopRecording() {
     root.holding = false
-    vxCmd.command = root.dictationBackend
-      ? ["omarchy", "dictation", "stop"]
-      : ["voxtype", "record", "stop"]
-    vxCmd.running = true
-  }
-
-  // Which dictation backend omarchy has selected: "" when none is configured
-  // (then the raw voxtype path is the only thing that can work).
-  function probeDictation() {
-    if (!dictationProbe.running) dictationProbe.running = true
-  }
-
-  function sendEnter() {
-    enterCmd.command = ["wtype", "-k", "Return"]
-    enterCmd.running = true
-  }
-
-  function deleteLastChar() {
-    delCmd.command = ["wtype", "-k", "BackSpace"]
-    delCmd.running = true
-  }
-
-  function isTerminalClass(cls) {
-    return root.terminalClasses.indexOf(String(cls || "").toLowerCase()) !== -1
-  }
-
-  // Clear the whole input. A terminal gets Ctrl+A + Ctrl+K (readline
-  // beginning-of-line + kill-line); anything else gets Ctrl+A + BackSpace
-  // (select-all + delete). Ask Hyprland which window owns the keyboard first;
-  // on any probe failure the GUI sequence is the safe default (Ctrl+K in a
-  // browser is the search bar, not kill-line).
-  function clearInput() {
-    if (clearWinProbe.running) return
-    clearWinProbe.running = true
-  }
-
-  function sendArrow(dir) {
-    arrowCmd.command = ["wtype", "-k", dir]
-    arrowCmd.running = true
-  }
-
-  // Copy argv element by element (QML may hand a model's nested array back as
-  // a QVariantList, which concat would splice in as one element).
-  function sendCliKey(argv) {
-    var cmd = ["wtype"]
-    for (var i = 0; i < argv.length; i++) cmd.push(String(argv[i]))
-    cliCmd.command = cmd
-    cliCmd.running = true
+    root.runDictation("stop")
   }
 
   // ---- virtual keyboard --------------------------------------------------
@@ -516,11 +451,6 @@ Item {
   function toggleVk() {
     if (root.vkVisible) root.hideVk()
     else root.showVk()
-  }
-
-  // The voice pad's ⌨ half: bring the keyboard up/toggle it.
-  function selectInputMode(mode) {
-    if (mode === "keyboard") root.toggleVk()
   }
 
   // Pre-start the keyboard HIDDEN at shell start, so the lock screen can
@@ -544,7 +474,6 @@ Item {
     var changed = vis !== root.vkVisible
     root.vkVisible = vis
     if (changed && vis && root.voiceInputOpen) root.hideVoiceInput()
-    if (changed && !vis) root.cliKeysOpen = false
   }
 
   function onVkState(out) {
@@ -557,7 +486,7 @@ Item {
 
   // Hyprland's event socket: `openlayer` / `closelayer` is the keyboard's real
   // state, so folding it away with its own ▼ key is reflected the moment the
-  // layer unmaps instead of up to 1.5 s later. Monitor events re-read the
+  // layer unmaps instead of up to 5 s later. Monitor events re-read the
   // transform, which has no event of its own.
   function onHyprEvent(line) {
     root.hyprEventCount++
@@ -570,24 +499,12 @@ Item {
     if (/^monitor(added|removed|layout)/.test(line)) root.pollTransform()
   }
 
-  // Backend state names: idle / recording / transcribing / outputting /
-  // streaming / eager-recording (written to voxtype's state file). A backend
-  // without a state file (superwhisper) is driven by our own press events.
-  function updateVoxtypeState(name) {
-    var n = String(name || "").trim().toLowerCase()
-    if (root.dictationBackend && root.dictationBackend !== "voxtype") {
-      root.voxtypeUp = true
-      root.recording = root.holding
-      root.transcribing = false
-      return
-    }
-    root.voxtypeUp = n !== ""
-    root.recording = (n === "recording" || n === "streaming" || n === "eager-recording")
-    root.transcribing = (n === "transcribing" || n === "outputting")
+  function pollLock() {
+    if (!lockProbe.running) lockProbe.running = true
   }
 
-  function pollVoxtype() {
-    if (!vxStateProbe.running) vxStateProbe.running = true
+  function pollTransform() {
+    if (!transformProbe.running) transformProbe.running = true
   }
 
   // Lock state: locked -> raise the keyboard for the password field (typing
@@ -606,31 +523,7 @@ Item {
     }
   }
 
-  function pollLock() {
-    if (!lockProbe.running) lockProbe.running = true
-  }
-
-  function pollTransform() {
-    if (!transformProbe.running) transformProbe.running = true
-  }
-
   // ---- probes ------------------------------------------------------------
-
-  BoundedProcess {
-    id: clearWinProbe
-    command: ["hyprctl", "activewindow", "-j"]
-    onStreamFinished: {
-      var cls = ""
-      try { cls = String((JSON.parse(output || "{}") || {}).class || "") } catch (e) {}
-      var cmd = root.isTerminalClass(cls)
-        ? ["wtype", "-M", "ctrl", "-k", "a", "-k", "k", "-m", "ctrl"]
-        : ["wtype", "-M", "ctrl", "-k", "a", "-m", "ctrl", "-k", "BackSpace"]
-      clrCmd.command = cmd
-      console.log("clear: focused class=[" + cls + "] terminal=" + root.isTerminalClass(cls)
-        + " -> " + cmd.join(" "))
-      clrCmd.running = true
-    }
-  }
 
   // Visibility = the keyboard layer actually present in `hyprctl layers`
   // (wvkbd hides by unmapping, so a ▼-key collapse is seen too).
@@ -674,29 +567,6 @@ Item {
       } catch (e) {}
       root.onLockState(locked)
     }
-  }
-
-  // The configured dictation backend (omarchy 4.5 owns that choice).
-  BoundedProcess {
-    id: dictationProbe
-    command: ["omarchy-default-dictation"]
-    onStreamFinished: root.dictationBackend = String(output || "").trim()
-  }
-
-  // Voxtype live state — same state file `voxtype status` reads, so the
-  // hold-to-talk visuals agree with the F9 / SUPER+CTRL+X hotkeys as well.
-  // The daemon removes the file on exit, so an empty read = daemon down.
-  BoundedProcess {
-    id: vxStateProbe
-    command: ["bash", "-c", "cat \"$XDG_RUNTIME_DIR/voxtype/state\" 2>/dev/null; echo; true"]
-    onStreamFinished: root.updateVoxtypeState(String(output || "").trim())
-  }
-
-  FileView {
-    path: root.voxtypeStateDir
-    watchChanges: true
-    printErrors: false
-    onFileChanged: if (!vxStateProbe.running) vxStateProbe.running = true
   }
 
   // Auto-rotate sensor reader: one long-lived process, labels on change only.
@@ -779,9 +649,9 @@ Item {
     onTriggered: root.pollLock()
   }
 
-  // Safety net for the event-driven state above: the keyboard layer, the
-  // voxtype state file and the transform each have an event/watch already, so
-  // this only catches one that was missed (socket down, file created late).
+  // Safety net for the event-driven state above: the keyboard layer and the
+  // transform each have an event already, so this only catches one that was
+  // missed (socket down).
   Timer {
     id: slowPoller
     interval: 5000
@@ -790,26 +660,28 @@ Item {
     triggeredOnStart: true
     onTriggered: {
       root.pollVk()
-      root.pollVoxtype()
       root.pollTransform()
     }
   }
 
-  // The shell may restore PersistentProperties asynchronously; wait before
-  // applying the saved angle so a stale empty value cannot reset the screen.
+  // Restore the saved angle once, and pre-start the keyboard hidden, 2.5 s in:
+  // `prefsDirty` already protects an action that races the state-file load, and
+  // lockProbe would start the keyboard on demand anyway.
   Timer {
     id: settleTimer
     interval: 2500
     running: true
     repeat: false
-    triggeredOnStart: true
     onTriggered: {
       root.initRotation()
-      root.preStartVk()
+      // A session that is already locked raised the keyboard for the password
+      // field; forcing it hidden here would fold it away under the lock.
+      if (!root.locked) root.preStartVk()
     }
   }
 
   // ------------------------------------------------- voice overlay (bottom-right)
+  // The one touch affordance Omarchy does not have: press & hold to talk.
   Variants {
     model: Quickshell.screens
     delegate: Component {
@@ -826,8 +698,8 @@ Item {
 
         anchors { bottom: true; right: true }
         margins { bottom: 28; right: 28 }
-        implicitWidth: 240
-        implicitHeight: 230
+        implicitWidth: 200
+        implicitHeight: 176
 
         Column {
           anchors.centerIn: parent
@@ -836,9 +708,8 @@ Item {
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: {
-              if (!root.voxtypeUp) return root.t("voice.down")
-              if (root.transcribing) return root.t("voice.transcribing")
-              if (root.holding || root.recording) return root.t("voice.release")
+              if (root.holding) return root.t("voice.release")
+              if (root.busy) return root.t("voice.transcribing")
               return root.t("voice.hold")
             }
             color: Color.foreground
@@ -853,17 +724,17 @@ Item {
             height: 120
             radius: width / 2
             anchors.horizontalCenter: parent.horizontalCenter
-            color: (root.holding || root.recording)
+            color: root.holding
               ? Util.alpha(Color.urgent, 0.9)
               : Util.alpha(Color.accent, 0.14)
             border.width: 2
-            border.color: (root.holding || root.recording)
+            border.color: root.holding
               ? Color.urgent : Util.alpha(Color.foreground, 0.35)
 
             Text {
               anchors.centerIn: parent
               text: "\uF130"          // fa-microphone
-              color: (root.holding || root.recording) ? "#ffffff" : Color.foreground
+              color: root.holding ? "#ffffff" : Color.foreground
               font.family: Style.font.family
               font.pixelSize: 44
             }
@@ -875,10 +746,10 @@ Item {
               color: "transparent"
               border.width: 3
               border.color: Util.alpha(Color.urgent, 0.6)
-              visible: root.holding || root.recording
+              visible: root.holding
               opacity: 0.7
               SequentialAnimation on scale {
-                running: root.holding || root.recording
+                running: root.holding
                 loops: Animation.Infinite
                 NumberAnimation { from: 1.0; to: 1.35; duration: 700; easing.type: Easing.InOutQuad }
                 NumberAnimation { from: 1.35; to: 1.0; duration: 700; easing.type: Easing.InOutQuad }
@@ -896,225 +767,11 @@ Item {
               onCanceled: root.stopRecording()
             }
           }
-
-          // Delete · Clear · Enter — fix or send the just-dictated text.
-          Row {
-            id: actionRow
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: 232
-            spacing: 8
-
-            Rectangle {
-              width: (actionRow.width - actionRow.spacing * 2) / 3
-              height: 44
-              radius: 12
-              color: Util.alpha(Color.accent, 0.12)
-              border.width: 1
-              border.color: Util.alpha(Color.foreground, 0.3)
-              Text {
-                anchors.centerIn: parent
-                text: root.t("action.delete")
-                color: Color.foreground
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
-              }
-              TapHandler { onTapped: root.deleteLastChar() }
-            }
-
-            Rectangle {
-              width: (actionRow.width - actionRow.spacing * 2) / 3
-              height: 44
-              radius: 12
-              color: Util.alpha(Color.accent, 0.12)
-              border.width: 1
-              border.color: Util.alpha(Color.foreground, 0.3)
-              Text {
-                anchors.centerIn: parent
-                text: root.t("action.clear")
-                color: Color.foreground
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
-              }
-              TapHandler { onTapped: root.clearInput() }
-            }
-
-            Rectangle {
-              width: (actionRow.width - actionRow.spacing * 2) / 3
-              height: 44
-              radius: 12
-              color: Util.alpha(Color.accent, 0.12)
-              border.width: 1
-              border.color: Util.alpha(Color.foreground, 0.3)
-              Text {
-                anchors.centerIn: parent
-                text: root.t("action.enter")
-                color: Color.foreground
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
-                font.bold: true
-              }
-              TapHandler { onTapped: root.sendEnter() }
-            }
-          }
         }
 
         // If the surface goes away mid-press (bar reload / shell reload),
-        // never strand voxtype recording.
-        Component.onDestruction: if (root.holding || root.recording) root.stopRecording()
-      }
-    }
-  }
-
-  // --------------------------------------- caret + CLI key pad (bottom-left)
-  // Voice-mode only: with the on-screen keyboard up, the keyboard already
-  // carries Esc / Tab / Ctrl / arrows, so the pad would just cover content
-  // above it. Bottom margin 40 == the voice bar's button row.
-  Variants {
-    model: Quickshell.screens
-    delegate: Component {
-      PanelWindow {
-        id: dirPad
-        required property var modelData
-        screen: modelData
-        visible: !root.locked && root.voiceInputOpen
-        color: "transparent"
-        WlrLayershell.namespace: "maxt-tablet-dirpad"
-        WlrLayershell.layer: WlrLayer.Top
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-        exclusionMode: ExclusionMode.Ignore
-
-        anchors { bottom: true; left: true }
-        margins { bottom: 40; left: 28 }
-        implicitWidth: 232
-        // Collapsed = toggle bar + caret arrows (32 + 8 + 44 = 84).
-        // Expanded adds the 4x2 CLI grid above the bar (96 + 8 + 32 + 8 + 44).
-        implicitHeight: root.cliKeysOpen ? 188 : 84
-
-        Column {
-          anchors.centerIn: parent
-          spacing: 8
-
-          // Agent control keys (pi / codex CLI) — only while expanded.
-          Grid {
-            visible: root.cliKeysOpen
-            columns: 4
-            spacing: 8
-            width: 232
-
-            Repeater {
-              model: root.cliKeys
-              delegate: Rectangle {
-                id: cliKey
-                required property var modelData
-                width: 52
-                height: 44
-                radius: 12
-                color: Util.alpha(Color.accent, 0.12)
-                border.width: 1
-                border.color: Util.alpha(Color.foreground, 0.3)
-                Text {
-                  anchors.centerIn: parent
-                  text: cliKey.modelData.label
-                  color: Color.foreground
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.body
-                }
-                TapHandler { onTapped: root.sendCliKey(cliKey.modelData.argv) }
-              }
-            }
-          }
-
-          // Toggle bar. The chevron points the way the grid appears (up).
-          Row {
-            spacing: 8
-
-            Rectangle {
-              width: 232
-              height: 32
-              radius: 12
-              color: Util.alpha(Color.accent, 0.08)
-              border.width: 1
-              border.color: Util.alpha(Color.foreground, 0.22)
-              Text {
-                anchors.centerIn: parent
-                text: root.t("cli.keys") + (root.cliKeysOpen ? "  \u25BC" : "  \u25B2")
-                color: Util.alpha(Color.foreground, 0.85)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-              }
-              TapHandler { onTapped: root.cliKeysOpen = !root.cliKeysOpen }
-            }
-          }
-
-          Row {
-            spacing: 8
-
-            Rectangle {
-              width: 52
-              height: 44
-              radius: 12
-              color: Util.alpha(Color.accent, 0.12)
-              border.width: 1
-              border.color: Util.alpha(Color.foreground, 0.3)
-              Text {
-                anchors.centerIn: parent
-                text: "\u2190"
-                color: Color.foreground
-                font.family: Style.font.family
-                font.pixelSize: 22
-              }
-              TapHandler { onTapped: root.sendArrow("Left") }
-            }
-            Rectangle {
-              width: 52
-              height: 44
-              radius: 12
-              color: Util.alpha(Color.accent, 0.12)
-              border.width: 1
-              border.color: Util.alpha(Color.foreground, 0.3)
-              Text {
-                anchors.centerIn: parent
-                text: "\u2192"
-                color: Color.foreground
-                font.family: Style.font.family
-                font.pixelSize: 22
-              }
-              TapHandler { onTapped: root.sendArrow("Right") }
-            }
-            Rectangle {
-              width: 52
-              height: 44
-              radius: 12
-              color: Util.alpha(Color.accent, 0.12)
-              border.width: 1
-              border.color: Util.alpha(Color.foreground, 0.3)
-              Text {
-                anchors.centerIn: parent
-                text: "\u2191"
-                color: Color.foreground
-                font.family: Style.font.family
-                font.pixelSize: 22
-              }
-              TapHandler { onTapped: root.sendArrow("Up") }
-            }
-            Rectangle {
-              width: 52
-              height: 44
-              radius: 12
-              color: Util.alpha(Color.accent, 0.12)
-              border.width: 1
-              border.color: Util.alpha(Color.foreground, 0.3)
-              Text {
-                anchors.centerIn: parent
-                text: "\u2193"
-                color: Color.foreground
-                font.family: Style.font.family
-                font.pixelSize: 22
-              }
-              TapHandler { onTapped: root.sendArrow("Down") }
-            }
-          }
-        }
+        // never strand a recording.
+        Component.onDestruction: if (root.holding) root.stopRecording()
       }
     }
   }
@@ -1182,10 +839,8 @@ Item {
     function getState(): string {
       return JSON.stringify({
         voiceInputOpen: root.voiceInputOpen,
-        cliKeysOpen: root.cliKeysOpen,
-        voiceRecording: root.recording,
-        voxtypeUp: root.voxtypeUp,
-        dictationBackend: root.dictationBackend,
+        voiceHolding: root.holding,
+        voiceBusy: root.busy,
         vkVisible: root.vkVisible,
         rotation: root.rotation,
         rotationLabel: root.rotationLabel(root.rotation),
@@ -1232,28 +887,13 @@ Item {
       return "hidden"
     }
 
-    function cliKeysToggle(): string {
-      root.cliKeysOpen = !root.cliKeysOpen
-      return root.cliKeysOpen ? "open" : "closed"
-    }
-
-    function clearNow(): string {
-      root.clearInput()
-      return "ok"
-    }
-
     function rotationNext(): string {
       root.rotationNext()
       return root.rotationLabel(root.rotation)
     }
 
-    function rotateLeft(): string {
-      root.rotateStep("next")
-      return root.rotationLabel(root.rotation)
-    }
-
-    function rotateRight(): string {
-      root.rotateStep("prev")
+    function rotationPrev(): string {
+      root.rotationPrev()
       return root.rotationLabel(root.rotation)
     }
 
@@ -1264,14 +904,6 @@ Item {
 
     function autoRotateToggle(): string {
       root.toggleAutoRotate()
-      return root.autoOrient ? "on" : "off"
-    }
-
-    function setAutoOrient(value: string): string {
-      var v = String(value || "").toLowerCase()
-      var on = (v === "on" || v === "true" || v === "1" || v === "yes")
-      if (on !== root.autoOrient) root.toggleAutoRotate()
-      else if (on) root.ensureOrientationWatch()
       return root.autoOrient ? "on" : "off"
     }
   }

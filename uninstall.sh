@@ -5,7 +5,8 @@
 # Safety rules:
 #   - files are removed only when they byte-match the repo copy (user edits are
 #     kept and reported instead)
-#   - packages are not auto-removed (they are shared; a reminder is printed)
+#   - packages are not touched (nothing was installed: the keyboard is a
+#     user-local build, dictation belongs to Omarchy)
 #   - the user's voxtype replacement table is user data — left in place
 #
 # Usage:
@@ -100,12 +101,10 @@ Done.
 
 Kept on purpose:
   - ~/.config/voxtype/replacements.tsv (user data)
-  - the wtype package (shared system package)
   - the voxtype service (still used by the F9 / SUPER+CTRL+X hotkeys)
 
 Helpers are installed as tlit-*; the pre-1.5 texp-* copies are no longer used.
-If this machine still carries them plus the full plugin's leftovers, run:
-  ./install.sh --clean-legacy
+If this machine still carries them, delete them with the full plugin's installer.
 
 Remove the plugin itself:
   omarchy plugin remove maxt.tablet-lite

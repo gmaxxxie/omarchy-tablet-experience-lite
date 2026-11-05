@@ -22,6 +22,7 @@
 //                 `overflow` is set; a misbehaving producer cannot grow the
 //                 collector without bound.
 //   output      — the collected stdout, truncated at maxBytes.
+//   exitCode    — the child's exit status (0 when it was killed).
 //   overflow    — true when the producer was killed for exceeding maxBytes.
 // Signal:
 //   streamFinished — emitted exactly once per run (normal exit, timeout, or
@@ -39,6 +40,7 @@ Item {
 
   property alias command: proc.command
   property alias running: proc.running
+  property int exitCode: -1
   property int deadlineMs: 5000
   property int maxBytes: 65536
   property string output: ""
@@ -53,6 +55,7 @@ Item {
         bp._done = false
         bp.overflow = false
         bp.output = ""
+        bp.exitCode = -1
       }
     }
     stdout: StdioCollector {
@@ -68,6 +71,10 @@ Item {
       }
       onStreamFinished: bp.finish(false)
     }
+    // The exit status is only known when `exited` fires, which is AFTER the
+    // collector's streamFinished. finish() therefore hands the consumer signal
+    // to the next event-loop turn, when exitCode has landed.
+    onExited: function(code) { bp.exitCode = code }
   }
 
   // Watchdog: a process that never exits gets SIGKILL'd after deadlineMs.
@@ -93,6 +100,6 @@ Item {
     if (bp._done) return
     bp._done = true
     if (!killed && !bp.overflow) bp.output = cap.text
-    bp.streamFinished()
+    Qt.callLater(function() { bp.streamFinished() })
   }
 }

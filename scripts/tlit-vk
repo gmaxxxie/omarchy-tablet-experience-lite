@@ -54,9 +54,10 @@ VK_WVKBD_LOCAL = os.path.expanduser("~/.local/bin/wvkbd-deskintl")
 STATE_DIR = os.path.join(os.environ.get(
     "XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "tlit-vk")
 STATE_FILE = os.path.join(STATE_DIR, "visible")
-# wvkbd panel heights (px) — big so the keys stay comfortable on the tablet.
-VK_HEIGHT_LANDSCAPE = os.environ.get("OMARCHY_VK_HEIGHT_LANDSCAPE", "350")
-VK_HEIGHT_PORTRAIT = os.environ.get("OMARCHY_VK_HEIGHT_PORTRAIT", "350")
+# wvkbd panel height (px) — big so the keys stay comfortable on the tablet.
+# One height for both orientations: wvkbd's -H/-L are the portrait/landscape
+# panels, and a rotated screen wants the same key size either way.
+VK_HEIGHT = os.environ.get("OMARCHY_VK_HEIGHT", "350")
 
 # wvkbd theming (v1.14): match the ACTIVE Omarchy theme. Colors are resolved
 # at spawn time from `omarchy theme color --all` (one call), so a theme
@@ -242,7 +243,7 @@ def start_vk():
               file=sys.stderr)
         return False
     subprocess.run(["setsid", binary, "--hidden",
-                    "-H", VK_HEIGHT_PORTRAIT, "-L", VK_HEIGHT_LANDSCAPE]
+                    "-H", VK_HEIGHT, "-L", VK_HEIGHT]
                    + vk_theme_args(),
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                    start_new_session=True)

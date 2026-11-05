@@ -6,8 +6,9 @@ import qs.Ui
 //
 // Auto is the first row and the default: sensor-following, the mode a
 // detachable tablet is normally used in. Picking an angle turns sensor
-// following off and pins the screen there; the two step buttons keep the old
-// one-tap "rotate 90°" behaviour that the single bar button replaced.
+// following off and pins the screen there. The four angles are the four
+// 90° steps, so the picker carries no separate ⟲/⟳ pair — SUPER+SHIFT+R and
+// `rotationNext` / `rotationPrev` still step without opening it.
 Column {
   id: root
 
@@ -61,34 +62,6 @@ Column {
           if (root.tablet) root.tablet.setRotationPreset(modelData)
           root.picked()
         }
-      }
-    }
-  }
-
-  Row {
-    id: stepRow
-    width: parent.width
-    spacing: Style.spacing.sm
-
-    Button {
-      width: (stepRow.width - stepRow.spacing) / 2
-      height: Style.space(40)
-      iconText: "\uF2EA"      // fa-undo
-      text: root.label("rotate.prev", "90° ⟲")
-      onClicked: {
-        if (root.tablet) root.tablet.rotationPrev()
-        root.picked()
-      }
-    }
-
-    Button {
-      width: (stepRow.width - stepRow.spacing) / 2
-      height: Style.space(40)
-      iconText: "\uF2F9"      // fa-rotate-right
-      text: root.label("rotate.next", "90° ⟳")
-      onClicked: {
-        if (root.tablet) root.tablet.rotationNext()
-        root.picked()
       }
     }
   }

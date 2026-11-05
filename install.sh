@@ -9,8 +9,8 @@
 # This script covers the non-QML parts and is safe to run from either the dev
 # clone or the installed plugin directory:
 #
-#   1. helper scripts -> ~/.local/bin/tlit-vk, tlit-vtext, tlit-mousehop,
-#      tlit-install-wvkbd, tlit-rotate, tlit-orient
+#   1. helper scripts -> ~/.local/bin/tlit-vk, tlit-rotate, tlit-orient,
+#      tlit-state, tlit-install-wvkbd, tlit-vtext, tlit-mousehop
 #      (the tlit- prefix keeps them apart from the full plugin's texp-* set)
 #   2. wvkbd-deskintl -> a user-local build with the ▼ collapse key
 #      (~/.local/bin/wvkbd-deskintl; it is the only keyboard backend)
@@ -21,19 +21,14 @@
 #      mousehop release hook right before typing
 #
 # Everything is reversible: modified files get *.bak.<timestamp> backups and
-# uninstall.sh undoes every change. No sudo is needed when the few packages are
-# already present (and none of the install steps write outside $HOME).
+# uninstall.sh undoes every change. Nothing writes outside $HOME, and no step
+# needs sudo.
 #
 # Usage:
 #   ./install.sh                 install scripts + hooks + wvkbd build
-#   ./install.sh --no-packages   never invoke pacman
 #   ./install.sh --no-wvkbd      skip the wvkbd build (keyboard unavailable until built)
 #   ./install.sh --dry-run       preview only, change nothing
 #   ./install.sh --verify        post-install self-check (read-only)
-#   ./install.sh --clean-legacy  remove what the superseded full plugin
-#                                (maxt.tablet-experience) left behind:
-#                                its texp-* helpers, the ~/local/share/texp-ink
-#                                handwriting models and the disabled hypr file
 # ============================================================================
 set -euo pipefail
 
@@ -41,19 +36,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 HYPR_DIR="${HYPR_DIR:-$HOME/.config/hypr}"
 DRY_RUN=0
-DO_PACKAGES=1
 BUILD_WVKBD=1
 VERIFY=0
-CLEAN_LEGACY=0
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run)     DRY_RUN=1 ;;
-    --no-packages) DO_PACKAGES=0 ;;
     --no-wvkbd)    BUILD_WVKBD=0 ;;
     --verify)      VERIFY=1 ;;
-    --clean-legacy) CLEAN_LEGACY=1 ;;
-    -h|--help)     sed -n '2,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)     sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $arg (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -130,7 +121,7 @@ if [ "$VERIFY" -eq 1 ]; then
     if backend="$(omarchy-default-dictation 2>/dev/null)" && [ -n "$backend" ]; then
       ok "dictation backend: $backend (the mic button drives omarchy dictation)"
     else
-      warn "no omarchy dictation backend configured — the mic button falls back to 'voxtype record'"
+      warn "no dictation backend selected — Setup > Defaults > Dictation (the mic button says so)"
     fi
     pp="$(voxtype config get output.post_process.command 2>/dev/null | tr -d '"')"
     if [ "$pp" = "$BIN_DIR/tlit-vtext" ]; then
@@ -164,88 +155,20 @@ if [ "$VERIFY" -eq 1 ]; then
     warn "plugin IPC does not answer yet — reload the shell / re-login"
   fi
 
-  if [ "$fail" -eq 0 ] && [ ! -e "$HOME/.local/share/texp-ink" ]; then
+  if [ "$fail" -eq 0 ]; then
     log "self-check passed"
-  elif [ "$fail" -ne 0 ]; then
-    warn "self-check found problems (see above)"; exit 1
   else
-    warn "self-check passed, but the full plugin's handwriting models are still in"
-    warn "  ~/.local/share/texp-ink (~90 MB) — remove with: ./install.sh --clean-legacy"
+    warn "self-check found problems (see above)"; exit 1
   fi
   exit 0
 fi
 
 [ "$DRY_RUN" -eq 1 ] && log "DRY RUN — nothing will be changed"
 
-# ------------------------------------------------- legacy cleanup only
-# The lite plugin keeps only what it needs. The full plugin
-# (maxt.tablet-experience) and the pre-1.5 lite install left helpers, a 90 MB
-# handwriting model and a disabled hypr config behind; none of it is read by
-# this plugin. Explicit opt-in, because it deletes files outside the repo.
-if [ "$CLEAN_LEGACY" -eq 1 ]; then
-  log "cleaning leftovers of the superseded full plugin / pre-1.5 lite install"
-  freed_before="$(du -scm "$HOME/.local/share/texp-ink" 2>/dev/null | tail -1 | cut -f1)"
-
-  # Dry-run prints "would remove"; the real run removes and says so once.
-  remove_path() { # $1 path, $2 label (defaults to the path)
-    local p="$1" label="${2:-$1}"
-    [ -e "$p" ] || return 0
-    if [ "$DRY_RUN" -eq 1 ]; then
-      printf '    would remove: %s\n' "$p"
-    else
-      rm -rf -- "$p" && log "removed $label"
-    fi
-  }
-
-  # Helpers that only the full plugin ever used.
-  for s in texp-ink texp-ink-key texp-touch texp-window texp-close \
-           texp-bar-probe texp-hw-laptop-closed texp-kbdetect \
-           texp-sddm-vk texp-priv-install; do
-    remove_path "$BIN_DIR/$s"
-  done
-
-  # The pre-1.5 lite helpers (now tlit-*). Shared names with the full plugin,
-  # so they go only when that plugin is not installed.
-  if [ -d "$HOME/.config/omarchy/plugins/maxt.tablet-experience" ]; then
-    warn "maxt.tablet-experience is still installed — keeping the shared texp-* helpers"
-  else
-    for s in texp-vk texp-orient texp-rotate texp-mousehop texp-vtext \
-             texp-voxtype-wire texp-install-wvkbd; do
-      remove_path "$BIN_DIR/$s" "stale helper $BIN_DIR/$s"
-    done
-  fi
-
-  # Handwriting recognition models (offline PP-OCRv6, ~90 MB).
-  remove_path "$HOME/.local/share/texp-ink" \
-    "$HOME/.local/share/texp-ink (${freed_before:-?} MB of handwriting models)"
-
-  # The full plugin's Hyprland hook, disabled when lite took over.
-  for f in "$HYPR_DIR/tablet-experience.lua" \
-           "$HYPR_DIR/tablet-experience.lua.disabled-lite"; do
-    remove_path "$f"
-  done
-
-  log "legacy cleanup done"
-  exit 0
-fi
-
-# --------------------------------------------------------------- packages
-# wtype is the only package the lite feature set needs: the keyboard is the
-# user-local wvkbd build, and voxtype itself is AUR-only and is reported, not
-# installed silently.
-if [ "$DO_PACKAGES" -eq 1 ] && command -v pacman >/dev/null 2>&1; then
-  REQUIRED=(wtype)
-  MISSING=()
-  for p in "${REQUIRED[@]}"; do
-    pacman -Q "$p" >/dev/null 2>&1 || MISSING+=("$p")
-  done
-  if [ "${#MISSING[@]}" -gt 0 ]; then
-    log "installing packages: ${MISSING[*]}"
-    run sudo pacman -S --needed --noconfirm "${MISSING[@]}"
-  else
-    ok "packages present: ${REQUIRED[*]}"
-  fi
-fi
+# No package step: nothing here needs one. The keyboard is the user-local
+# wvkbd build, the dictation backend is Omarchy's (voxtype is AUR-only and is
+# reported, not installed silently), and the plugin no longer types anything
+# itself now that Omarchy's dictation does.
 
 # ---------------------------------------------------------- helper scripts
 log "installing helper scripts -> $BIN_DIR"
@@ -345,8 +268,8 @@ Done.
              omarchy-shell maxt.tablet-lite keyboardToggle
   Voice    : the bar 🎤 button (press & hold the big mic), or
              omarchy-shell maxt.tablet-lite voiceInputToggle
-  Rotation : SUPER+SHIFT+R, or the bar ⟳ button (next 90°)
-  Auto     : the bar 🧭 button (sensor-following on/off)
+  Rotation : the bar ⟳ button (picker: auto / 0° / 90° / 180° / 270°),
+             SUPER+SHIFT+R steps 90°
   Lock     : the keyboard auto-raises on lock; the floating ⌨ button right
              of the password field re-invokes it after ▼ folds it away
 
