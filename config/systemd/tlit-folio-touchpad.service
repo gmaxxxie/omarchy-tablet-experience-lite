@@ -1,0 +1,12 @@
+[Unit]
+Description=Tablet Lite: re-bind hid-multitouch for the X12 folio touchpad
+Documentation=https://github.com/gmaxxxie/omarchy-tablet-experience-lite
+After=systemd-udevd.service
+
+[Service]
+Type=oneshot
+# The hid "add" uevent is sent before the driver has finished probing, so give
+# the interface a moment and then let the driver probe it again from a clean
+# slate — that is what brings the touchpad's multitouch report channel back.
+ExecStart=/usr/bin/sleep 2
+ExecStart=/usr/local/bin/tlit-folio-touchpad --quiet

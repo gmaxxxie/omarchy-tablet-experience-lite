@@ -1,0 +1,12 @@
+# Tablet Lite — see /usr/local/bin/tlit-folio-touchpad for the whole story.
+#
+# The X12 Detachable Gen 1 folio keyboard (Darfon 17ef:60fe) loses the touchpad's
+# multitouch report channel when it is detached and snapped back on: only the
+# device's legacy relative "mouse" collection keeps working, so the cursor still
+# moves and clicks, but tap, clickpad press and two- and three-finger gestures
+# are dead until the interface is re-bound.
+#
+# No DRIVERS== match on purpose: the hid "add" uevent is sent before the driver
+# is probed, so DRIVERS is not reliably set here. The helper itself only acts on
+# interfaces that ended up bound to hid-multitouch.
+ACTION=="add", SUBSYSTEM=="hid", KERNEL=="0003:17EF:60FE.*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="tlit-folio-touchpad.service"

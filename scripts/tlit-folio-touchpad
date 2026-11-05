@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# tlit-folio-touchpad — give the folio keyboard's touchpad its fingers back.
+#
+# The ThinkPad X12 Detachable Gen 1 folio keyboard (Darfon 17ef:60fe) puts two
+# very different things on one HID interface: the real touchpad (BTN_TOOL_FINGER
+# / DOUBLETAP / TRIPLETAP / QUADTAP, ABS_MT_SLOT, ABS_MT_TRACKING_ID) and a
+# legacy relative "mouse" collection (REL_X/Y plus the buttons).
+#
+# Detach the keyboard and snap it back and USB re-enumerates; hid-multitouch
+# sometimes comes back with the multitouch report channel dead. The mouse
+# collection keeps working, so the cursor still moves and clicks — but tap,
+# clickpad press and two- and three-finger gestures are gone, and no ABS_MT
+# event ever reaches libinput. Nothing in Hyprland or the touchpad config is
+# wrong; only a driver re-bind (a probe from a clean slate) brings it back.
+#
+# install.sh installs this in /usr/local/bin with a oneshot systemd unit that a
+# udev rule starts two seconds after the keyboard appears, so re-attaching the
+# folio repairs itself. Run it by hand when the touchpad goes dumb again:
+#
+#   sudo tlit-folio-touchpad           re-bind, and say what happened
+#   sudo tlit-folio-touchpad --quiet   same, silent (the unit's mode)
+#
+# Exit status is 0 when the keyboard is not attached (nothing to do).
+set -euo pipefail
+
+HID_DRIVER="hid-multitouch"
+FOLIO_ID="17EF:60FE"     # Darfon folio case of the X12 Detachable Gen 1
+QUIET=0
+
+usage() { sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+log() { [ "$QUIET" -eq 1 ] || printf '%s\n' "$*"; }
+
+for arg in "$@"; do
+  case "$arg" in
+    -q|--quiet) QUIET=1 ;;
+    -h|--help)  usage; exit 0 ;;
+    *) printf 'unknown option: %s (see --help)\n' "$arg" >&2; exit 2 ;;
+  esac
+done
+
+shopt -s nullglob
+links=(/sys/bus/hid/drivers/"$HID_DRIVER"/0003:"$FOLIO_ID".*)
+if [ "${#links[@]}" -eq 0 ]; then
+  log "folio keyboard not attached (no $FOLIO_ID on $HID_DRIVER) — nothing to do"
+  exit 0
+fi
+
+for link in "${links[@]}"; do
+  dev="$(basename "$link")"
+  if ! printf '%s' "$dev" >"/sys/bus/hid/drivers/$HID_DRIVER/unbind" 2>/dev/null; then
+    printf 'cannot unbind %s — this needs root (sudo)\n' "$dev" >&2
+    exit 1
+  fi
+  sleep 0.5
+  if ! printf '%s' "$dev" >"/sys/bus/hid/drivers/$HID_DRIVER/bind" 2>/dev/null; then
+    printf 'unbound %s but could not bind it back — re-attach the keyboard\n' "$dev" >&2
+    exit 1
+  fi
+  log "re-bound $dev ($HID_DRIVER)"
+done
+
+# Say which node the touchpad came back as, so a manual run explains itself.
+if [ "$QUIET" -eq 0 ]; then
+  for e in /sys/bus/hid/devices/0003:"$FOLIO_ID".*/input/input*/event*; do
+    node="/dev/input/$(basename "$e")"
+    if udevadm info --query=property --name="$node" 2>/dev/null \
+        | grep -q '^ID_INPUT_TOUCHPAD=1'; then
+      log "touchpad node: $node"
+    fi
+  done
+fi
