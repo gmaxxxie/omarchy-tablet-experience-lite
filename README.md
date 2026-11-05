@@ -15,11 +15,16 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   candidate selection) and **arrows**. Built for the tablet with a visible
   **▼ collapse key** so it can be folded away anywhere. Toggle with `SUPER+U`,
   the bar **⌨** button, or
-  `omarchy-shell maxt.tablet-lite keyboardToggle`. `squeekboard` is the
-  fallback when the lite build is absent.
+  `omarchy-shell maxt.tablet-lite keyboardToggle`. wvkbd is the **only**
+  backend: when the lite build is missing the helper says so instead of
+  silently switching to a keyboard with different modifiers.
 - **Voice input** — the bar **🎤** button opens a bottom hold-to-talk overlay.
-  Press & hold → `voxtype record start`, release → local transcription typed at
-  the cursor with `wtype` (CJK works in terminals and every toolkit). **Delete /
+  Press & hold → `omarchy dictation start`, release → `omarchy dictation stop`:
+  the same commands the `ALT+SPACE` / `Alt_R` / `F9` hotkeys use, so Omarchy
+  4.5 owns the backend choice (voxtype, superwhisper, …) and the touch button
+  cannot drift from the keyboard shortcuts. Without a configured backend the
+  overlay falls back to `voxtype record start|stop`. The text is typed at the
+  cursor with `wtype` (CJK works in terminals and every toolkit). **Delete /
   Clear / Enter** fix or submit the line; a left-side **caret pad** moves through
   it; the expandable **CLI keys** grid sends `esc` `/` `tab` `⇧tab` `⌃C` `⌃D`
   `⌃J` `⌃T` for pi / codex CLI on a touch-only screen.
@@ -29,10 +34,10 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   are hidden: the keyboard itself already carries Esc / Tab / Ctrl / arrows.
 - **Rotation** — the bar **⟳** button and **`SUPER+SHIFT+R`** step the display
   through 0° / 90° / 180° / 270°. The separate **🧭** button toggles
-  **sensor-following auto-rotate** (`texp-orient`, sysfs accelerometer,
+  **sensor-following auto-rotate** (`tlit-orient`, sysfs accelerometer,
   calibrated for the ThinkPad X12) and highlights while it is on. Every
   rotation **preserves the monitor scale** and keeps Hyprland's **touch
-  calibration matrix** in step (`texp-rotate`), and the last angle is persisted
+  calibration matrix** in step (`tlit-rotate`), and the last angle is persisted
   across shell restarts.
 
 - **Lock screen** — the keyboard **auto-raises when the session locks** for
@@ -49,16 +54,17 @@ Chinese version: [README.zh-CN.md](README.zh-CN.md)
   clock on the narrower portrait bar.
 
 Deliberately absent: laptop/tablet state machine, keyboard-auto-switch,
-handwriting, window management, bar decluttering, multi-touch gestures, SDDM
-greeter changes (the lock screen is supported).
+handwriting, window management, bar decluttering, multi-touch gestures (the
+touch-swipe keyboard daemon is gone — the keyboard's ▼ key, `SUPER+U` and the
+bar button cover it), SDDM greeter changes (the lock screen is supported).
 
 ## Requirements
 
 - Omarchy 4.x (Quickshell shell) + Hyprland 0.56+ (Lua config API), Arch-based.
-- `wtype` and **voxtype** (AUR: `voxtype-bin`) for voice input.
-- `squeekboard` (fallback keyboard) and build deps for the wvkbd build
-  (`cairo pango wayland libxkbcommon`; already present on most Omarchy
-  installs).
+- `wtype` and a dictation backend (Omarchy 4.5's `omarchy dictation` ships
+  voxtype support: AUR `voxtype-bin`, `omarchy-install-dictation-voxtype`).
+- Build deps for the wvkbd build (`cairo pango wayland libxkbcommon`; already
+  present on most Omarchy installs).
 - A touchscreen helps, but nothing is hardware-specific: the keyboard and voice
   work with a mouse too.
 
@@ -82,13 +88,13 @@ It also works from a dev clone.
 |---|---|
 | *(none)* | helpers + wvkbd build + `SUPER+U` hook + voxtype wiring |
 | `--no-packages` | never invoke pacman |
-| `--no-wvkbd` | skip the build, use the squeekboard fallback |
+| `--no-wvkbd` | skip the build (the keyboard stays unavailable until built) |
 | `--dry-run` | preview everything, change nothing |
 | `--verify` | post-install self-check (read-only) |
+| `--clean-legacy` | delete what the superseded full plugin left behind (its `texp-*` helpers, the ~90 MB handwriting models, the disabled hypr file) |
 
-Nothing outside `$HOME` is written, and no sudo is needed when `squeekboard`
-and `wtype` are already installed. Every modified file gets a
-`*.bak.<timestamp>` first.
+Nothing outside `$HOME` is written, and no sudo is needed when `wtype` is
+already installed. Every modified file gets a `*.bak.<timestamp>` first.
 
 **Reload the shell once** (or re-login) so the plugin loads fresh, then
 `install.sh --verify`.
@@ -120,17 +126,20 @@ IPC: `getState` · `voiceInputToggle|Show|Hide` · `keyboardToggle|Show|Hide` ·
 ```
 Service.qml             QML service: voice overlay, caret/CLI pad, VK state
 BarWidget.qml           bar buttons: ⌨ keyboard + 🎤 voice
-scripts/texp-vk         keyboard toggle/show/hide (wvkbd or squeekboard)
-scripts/texp-install-wvkbd  user-local wvkbd-deskintl build (pinned + SHA-256)
-scripts/texp-rotate      rotate display + touch matrix, preserve scale
-scripts/texp-orient      IIO accelerometer posture probe (auto-rotate)
-scripts/texp-vtext      voxtype post-processing (technical-term table)
-scripts/texp-voxtype-wire   voxtype pre_output hook (mousehop release)
-scripts/texp-mousehop   hand a software-KVM input capture back before typing
+scripts/tlit-vk         keyboard toggle/show/hide (wvkbd only)
+scripts/tlit-install-wvkbd  user-local wvkbd-deskintl build (pinned + SHA-256)
+scripts/tlit-rotate     rotate display + touch matrix, preserve scale
+scripts/tlit-orient     IIO accelerometer posture probe (auto-rotate)
+scripts/tlit-vtext      voxtype post-processing (technical-term table)
+scripts/tlit-mousehop   hand a software-KVM input capture back before typing
 config/hypr/tablet-lite.lua  SUPER+U + SUPER+SHIFT+R + above_lock rule
 config/wvkbd/wvkbd-hide-key.patch  ▼ collapse key
 config/voxtype/replacements.tsv    default replacement table
 ```
+
+Helpers are installed in `~/.local/bin` as `tlit-*`, deliberately apart from
+the full plugin's `texp-*` set: both plugins can be installed side by side
+without one overwriting the other's keyboard helper.
 
 ## Uninstall
 

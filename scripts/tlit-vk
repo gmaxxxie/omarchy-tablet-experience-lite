@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""
+tlit-vk — virtual keyboard helper for Tablet Lite.
+
+Subcommands:
+  toggle   Show/hide the on-screen keyboard now (SUPER+U / bar button). The
+           keyboard is started on demand.
+  show     Show the keyboard now (start on demand if needed).
+  hide     Hide the keyboard (used by the voice-input <-> keyboard
+           exclusivity in Service.qml).
+  start-hidden  Start the keyboard backend and force it hidden (used at
+           shell start so the lock can raise it by signal later).
+
+Keyboard backend: **wvkbd-deskintl** — wlroots-native, with Ctrl / Super /
+Alt / Shift / AltGr, F1-F12, a full number row (Chinese candidate selection)
+and arrows. The lite build (installed by `tlit-install-wvkbd` into
+~/.local/bin) also carries a ▼ collapse key and is preferred over a PATH
+copy. There is no second backend: when the lite build is missing the helper
+says so and exits non-zero, instead of silently switching to a different
+keyboard with different modifiers.
+
+Visibility is read back from `hyprctl layers` (a mapped wvkbd layer), so a
+▼-key collapse is reflected immediately; the visible-state file under
+$XDG_STATE_HOME/tlit-vk remains only as a fallback mirror.
+
+This helper never touches /dev/input: the bottom-edge swipe gesture of the
+full plugin is deliberately absent here (SUPER+U, the bar button and the
+lock screen cover it).
+"""
+
+import json
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import time
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+START_TIMEOUT = 6.0        # max seconds to wait for the keyboard to come up
+
+# ---------------------------------------------------------------------------
+# Keyboard backend: exactly one — wvkbd-deskintl (lite build preferred).
+# ---------------------------------------------------------------------------
+VK_WVKBD = "wvkbd-deskintl"
+# The lite install builds a hide-key-only wvkbd into the user's bin. Prefer it
+# explicitly: on a machine that also has the full plugin's /usr/local copy,
+# PATH would otherwise pick the wrong (handwriting-capable) build.
+VK_WVKBD_LOCAL = os.path.expanduser("~/.local/bin/wvkbd-deskintl")
+STATE_DIR = os.path.join(os.environ.get(
+    "XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "tlit-vk")
+STATE_FILE = os.path.join(STATE_DIR, "visible")
+# wvkbd panel heights (px) — big so the keys stay comfortable on the tablet.
+VK_HEIGHT_LANDSCAPE = os.environ.get("OMARCHY_VK_HEIGHT_LANDSCAPE", "350")
+VK_HEIGHT_PORTRAIT = os.environ.get("OMARCHY_VK_HEIGHT_PORTRAIT", "350")
+
+# wvkbd theming (v1.14): match the ACTIVE Omarchy theme. Colors are resolved
+# at spawn time from `omarchy theme color --all` (one call), so a theme
+# switch applies on the next keyboard open. Disable with OMARCHY_VK_THEME=off.
+VK_THEME = os.environ.get("OMARCHY_VK_THEME", "auto") != "off"
+
+# wvkbd flag -> (Omarchy semantic color key, fallback hex). Fallbacks are the
+# Gruvbox dark palette (the Omarchy default) used when the lookup fails, so
+# the keyboard still looks right on a stock install.
+VK_THEME_MAP = (
+    ("--bg",            "background",         "#282828"),
+    ("--fg",            "lighter_background", "#3c3836"),
+    ("--fg-sp",         "selection",          "#504945"),
+    ("--press",         "accent",             "#7daea3"),
+    ("--press-sp",      "accent",             "#7daea3"),
+    ("--swipe",         "accent",             "#7daea3"),
+    ("--swipe-sp",      "accent",             "#7daea3"),
+    ("--text",          "foreground",         "#d4be98"),
+    ("--text-sp",       "light_foreground",   "#bdae93"),
+    ("--text-press",    "darker_background",  "#161616"),
+    ("--text-press-sp", "darker_background",  "#161616"),
+    ("--text-swipe",    "darker_background",  "#161616"),
+    ("--text-swipe-sp", "darker_background",  "#161616"),
+)
+
+def run_cap(cmd, timeout=5.0, max_bytes=131072, text=False):
+    """Run cmd capturing at most max_bytes of stdout; watchdog-kill the whole
+    process group if it does not exit in time or emits too much (security
+    review finding 3). Returns str (text=True) or bytes, truncated at cap."""
+    import signal
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+    except (FileNotFoundError, PermissionError):
+        return "" if text else b""
+    buf = bytearray()
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            rem = deadline - time.monotonic()
+            if rem <= 0:
+                break
+            r, _, _ = select.select([p.stdout], [], [], max(0.0, rem))
+            if not r:
+                break
+            chunk = os.read(p.stdout.fileno(), 65536)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            if len(buf) >= max_bytes:
+                break
+    finally:
+        # watchdog: terminate the full process group so no child lingers
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            p.wait(timeout=1)
+        except subprocess.SubprocessError:
+            try:
+                p.kill()
+            except Exception:
+                pass
+    out = bytes(buf[:max_bytes])
+    return out.decode("utf-8", "replace") if text else out
+
+
+# ---------------------------------------------------------------------------
+# Keyboard control: wvkbd through its show/hide signals
+# ---------------------------------------------------------------------------
+def vk_binary():
+    """Full path to wvkbd-deskintl (user build first, then PATH), or ""."""
+    if os.access(VK_WVKBD_LOCAL, os.X_OK):
+        return VK_WVKBD_LOCAL
+    return shutil.which(VK_WVKBD) or ""
+
+
+def vk_running():
+    try:
+        return bool(run_cap(["pgrep", "-x", VK_WVKBD], timeout=3,
+                            max_bytes=4096).strip())
+    except Exception:
+        return False
+
+
+def vk_visible():
+    """True when a wvkbd layer is actually mapped.
+
+    `hyprctl layers` is the same source the shell polls, and unlike the state
+    file it stays correct when the keyboard is folded away with its own ▼
+    key (wvkbd hides by unmapping; nothing writes the state file then).
+    """
+    out = run_cap(["hyprctl", "layers", "-j"], timeout=3,
+                  max_bytes=1 << 20, text=True)
+    try:
+        data = json.loads(out or "{}")
+        for output in data.values():
+            for layers in (output.get("levels") or {}).values():
+                for layer in layers or []:
+                    if "wvkbd" in str(layer.get("namespace", "")):
+                        return True
+    except Exception:
+        pass
+    # Fallback for a compositor without `hyprctl layers`.
+    try:
+        return open(STATE_FILE).read().strip() == "visible"
+    except OSError:
+        return False
+
+
+def write_state(visible):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        f.write("visible\n" if visible else "hidden\n")
+
+
+def vk_theme_args():
+    """wvkbd color args matching the active Omarchy theme; [] when theming
+    is disabled or the theme lookup fails (wvkbd defaults take over)."""
+    if not VK_THEME:
+        return []
+    colors = {}
+    try:
+        out = run_cap(["omarchy", "theme", "color", "--all"], timeout=5,
+                      max_bytes=65536, text=True)
+        for line in out.splitlines():
+            key, _, val = line.partition("\t")
+            if re.fullmatch(r"#[0-9a-fA-F]{6}", val.strip()):
+                colors[key] = val.strip()
+    except Exception:
+        pass
+    args = []
+    for flag, key, fallback in VK_THEME_MAP:
+        # wvkbd-deskintl does NOT accept a '#' prefix on color args (a '#'
+        # hex is silently ignored and the default palette is used) — strip it.
+        args += [flag, colors.get(key, fallback).lstrip("#")]
+    return args
+
+
+def start_vk():
+    if vk_running():
+        return True
+    binary = vk_binary()
+    if not binary:
+        print("tlit-vk: wvkbd-deskintl is not installed — run "
+              "~/.local/bin/tlit-install-wvkbd (or install.sh)",
+              file=sys.stderr)
+        return False
+    subprocess.run(["setsid", binary, "--hidden",
+                    "-H", VK_HEIGHT_PORTRAIT, "-L", VK_HEIGHT_LANDSCAPE]
+                   + vk_theme_args(),
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   start_new_session=True)
+    deadline = time.monotonic() + START_TIMEOUT
+    while not vk_running() and time.monotonic() < deadline:
+        time.sleep(0.2)
+    return vk_running()
+
+
+def set_visible(visible):
+    if not start_vk():
+        return False
+    # wvkbd: SIGUSR2 = show, SIGUSR1 = hide
+    subprocess.run(["pkill", "-USR2" if visible else "-USR1", "-x", VK_WVKBD],
+                   capture_output=True, timeout=3)
+    write_state(visible)
+    return True
+
+
+def toggle_vk():
+    set_visible(not vk_visible())
+
+
+def show_vk():
+    set_visible(True)
+
+
+def hide_vk():
+    set_visible(False)
+
+
+def start_hidden():
+    """Pre-start the backend and make sure it is hidden.
+
+    The lock screen needs the keyboard already running before the session
+    locks, so it can flip it visible with a signal instead of opening a new
+    Wayland client under the lock. Forcing hidden also fixes a keyboard left
+    visible by a previous session.
+    """
+    set_visible(False)
+
+
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    args = sys.argv[1:] or ["help"]
+    cmd = args[0]
+    if cmd == "toggle":
+        toggle_vk()
+    elif cmd == "show":
+        show_vk()
+    elif cmd == "hide":
+        hide_vk()
+    elif cmd == "start-hidden":
+        start_hidden()
+    else:
+        print(__doc__)

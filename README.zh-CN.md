@@ -13,10 +13,14 @@
   Shift / AltGr**、**F1–F12**、**数字行**（中文候选词）和**方向键**。为平板
   编译，并加了一个可见的 **▼ 收起键**，随处都能把键盘折起来。切换方式：
   `SUPER+U`、状态栏 **⌨** 按钮、或
-  `omarchy-shell maxt.tablet-lite keyboardToggle`。没有 lite 构建时回退到
-  `squeekboard`。
-- **语音输入** —— 状态栏 **🎤** 按钮打开底部的按住说话浮层。按住开始录音，
-  松开后本地转写，用 `wtype` 打进当前光标处（终端和各种 toolkit 都支持中文）。
+  `omarchy-shell maxt.tablet-lite keyboardToggle`。wvkbd 是**唯一**后端：lite
+  构建缺失时 helper 会直接报错，不再悄悄换成按键不同的另一种键盘。
+- **语音输入** —— 状态栏 **🎤** 按钮打开底部的按住说话浮层。按住开始，
+  松开后由 `omarchy dictation start|stop` 完成转写：这就是 `ALT+SPACE` /
+  `Alt_R` / `F9` 快捷键走的那套命令，后端（voxtype、superwhisper…）由
+  Omarchy 4.5 统一管理，触屏按钮和键盘快捷键不会各走一套。没有配置后端时
+  回退到 `voxtype record start|stop`。转写结果用 `wtype` 打进当前光标处
+  （终端和各种 toolkit 都支持中文）。
   **Delete / Clear / Enter** 修正或提交这一行；左侧 **← → ↑ ↓** 移动光标；
   展开 **CLI keys** 网格可发送 `esc` `/` `tab` `⇧tab` `⌃C` `⌃D` `⌃J` `⌃T`，
   方便在纯触屏上操作 pi / codex CLI。
@@ -26,9 +30,9 @@
   内容。
 - **屏幕旋转** —— 状态栏 **⟳** 按钮和 **`SUPER+SHIFT+R`** 在 0° / 90° /
   180° / 270° 之间旋转。旁边的 **🧭** 按钮开关**传感器自动旋转**
-  （`texp-orient` 读 sysfs 加速度计，按 ThinkPad X12 校准），开启时高亮。
+  （`tlit-orient` 读 sysfs 加速度计，按 ThinkPad X12 校准），开启时高亮。
   每次旋转都会**保留当前缩放**并同步 Hyprland 的**触摸校准矩阵**
-  （`texp-rotate`），最后一个角度会持久化，shell 重启不会悄悄转回横屏。
+  （`tlit-rotate`），最后一个角度会持久化，shell 重启不会悄悄转回横屏。
 
 - **锁屏键盘** —— 锁屏时**自动升起键盘**用于输入密码（指纹仍然可用），
   通过 `above_lock` 渲染在 Omarchy 锁屏界面之上。密码框右侧有一个浮动 **⌨**
@@ -41,16 +45,17 @@
   再和时钟挤在一起。
 
 有意去掉：笔记本/平板状态机、键盘自动切换、手写、窗口管理、状态栏精简、
-多点触控手势、SDDM 登录界面改动（锁屏已支持）。
+多点触控手势（底部上滑调键盘的守护进程已删——▼ 键、`SUPER+U` 和状态栏
+按钮已经够用）、SDDM 登录界面改动（锁屏已支持）。
 
 ## 依赖
 
 - Omarchy 4.x（Quickshell）+ Hyprland 0.56+（Lua 配置 API），Arch 系。
-- 语音需要 `wtype` 和 **voxtype**（AUR：`voxtype-bin`）。
-- 自动旋转需要 `python3` 和可读的 IIO 加速度计（`texp-orient` 直读 sysfs，
+- 语音需要 `wtype` 和一个听写后端（Omarchy 4.5 的 `omarchy dictation`
+  已内置 voxtype 支持：AUR `voxtype-bin`、`omarchy-install-dictation-voxtype`）。
+- 自动旋转需要 `python3` 和可读的 IIO 加速度计（`tlit-orient` 直读 sysfs，
   不需要额外的守护进程）。
-- `squeekboard`（回退键盘）；编译 wvkbd 需要 `cairo pango wayland
-  libxkbcommon`（多数 Omarchy 装机已有）。
+- 编译 wvkbd 需要 `cairo pango wayland libxkbcommon`（多数 Omarchy 装机已有）。
 - 有触摸屏最好，但没有任何硬件绑定：键鼠同样能用。
 
 ## 安装
@@ -73,11 +78,12 @@ omarchy plugin add https://github.com/gmaxxxie/omarchy-tablet-experience-lite.gi
 |---|---|
 | *(无)* | helper + wvkbd 构建 + `SUPER+U` 钩子 + voxtype 接线 |
 | `--no-packages` | 不调用 pacman |
-| `--no-wvkbd` | 跳过构建，直接用 squeekboard 回退 |
+| `--no-wvkbd` | 跳过构建（构建完成前键盘不可用） |
 | `--dry-run` | 只预览，不改任何东西 |
 | `--verify` | 安装后只读自检 |
+| `--clean-legacy` | 清掉已被取代的 full 插件残留（它的 `texp-*` helper、约 90 MB 手写模型、已禁用的 hypr 文件） |
 
-所有写入都在 `$HOME` 内；`squeekboard` 和 `wtype` 已装时不需要 sudo。
+所有写入都在 `$HOME` 内；`wtype` 已装时不需要 sudo。
 每个被修改的文件都会先备份成 `*.bak.<时间戳>`。
 
 **重载一次 shell**（或重新登录）让插件重新加载，然后运行
@@ -112,6 +118,9 @@ IPC：`getState` · `voiceInputToggle|Show|Hide` ·
 ~/.config/omarchy/plugins/maxt.tablet-lite/uninstall.sh
 omarchy plugin remove maxt.tablet-lite
 ```
+
+helper 都以 `tlit-*` 装进 `~/.local/bin`，刻意与 full 插件的 `texp-*` 分开：
+两个插件可以并存，不会互相覆盖对方的键盘 helper。
 
 ## 许可
 

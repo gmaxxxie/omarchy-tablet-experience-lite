@@ -9,10 +9,11 @@
 # This script covers the non-QML parts and is safe to run from either the dev
 # clone or the installed plugin directory:
 #
-#   1. helper daemons -> ~/.local/bin/texp-vk, texp-vtext, texp-voxtype-wire,
-#      texp-mousehop, texp-install-wvkbd, texp-rotate, texp-orient
+#   1. helper scripts -> ~/.local/bin/tlit-vk, tlit-vtext, tlit-mousehop,
+#      tlit-install-wvkbd, tlit-rotate, tlit-orient
+#      (the tlit- prefix keeps them apart from the full plugin's texp-* set)
 #   2. wvkbd-deskintl -> a user-local build with the ▼ collapse key
-#      (~/.local/bin/wvkbd-deskintl; squeekboard stays as the fallback)
+#      (~/.local/bin/wvkbd-deskintl; it is the only keyboard backend)
 #   3. Hyprland hooks  -> SUPER+U (virtual keyboard), SUPER+SHIFT+R (rotation)
 #      and above_lock for wvkbd in ~/.config/hypr/tablet-lite.lua, required
 #      from hyprland.lua
@@ -26,9 +27,13 @@
 # Usage:
 #   ./install.sh                 install scripts + hooks + wvkbd build
 #   ./install.sh --no-packages   never invoke pacman
-#   ./install.sh --no-wvkbd      skip the wvkbd build (squeekboard fallback)
+#   ./install.sh --no-wvkbd      skip the wvkbd build (keyboard unavailable until built)
 #   ./install.sh --dry-run       preview only, change nothing
 #   ./install.sh --verify        post-install self-check (read-only)
+#   ./install.sh --clean-legacy  remove what the superseded full plugin
+#                                (maxt.tablet-experience) left behind:
+#                                its texp-* helpers, the ~/local/share/texp-ink
+#                                handwriting models and the disabled hypr file
 # ============================================================================
 set -euo pipefail
 
@@ -39,6 +44,7 @@ DRY_RUN=0
 DO_PACKAGES=1
 BUILD_WVKBD=1
 VERIFY=0
+CLEAN_LEGACY=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -46,7 +52,8 @@ for arg in "$@"; do
     --no-packages) DO_PACKAGES=0 ;;
     --no-wvkbd)    BUILD_WVKBD=0 ;;
     --verify)      VERIFY=1 ;;
-    -h|--help)     sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --clean-legacy) CLEAN_LEGACY=1 ;;
+    -h|--help)     sed -n '2,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $arg (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -84,7 +91,7 @@ if [ "$VERIFY" -eq 1 ]; then
   log "Tablet Lite self-check (read-only)"
   fail=0
 
-  for s in texp-vk texp-vtext texp-voxtype-wire texp-mousehop texp-install-wvkbd texp-rotate texp-orient; do
+  for s in tlit-vk tlit-vtext tlit-mousehop tlit-install-wvkbd tlit-rotate tlit-orient; do
     if [ -x "$BIN_DIR/$s" ]; then ok "helper $BIN_DIR/$s"; else bad "helper missing: $BIN_DIR/$s"; fail=1; fi
   done
 
@@ -92,11 +99,9 @@ if [ "$VERIFY" -eq 1 ]; then
       && grep -q $'\xE2\x96\xBC' "$HOME/.local/bin/wvkbd-deskintl" 2>/dev/null; then
     ok "wvkbd-deskintl lite build with ▼ ($HOME/.local/bin/wvkbd-deskintl)"
   elif command -v wvkbd-deskintl >/dev/null 2>&1; then
-    warn "wvkbd-deskintl present but without the lite ▼ build — run $BIN_DIR/texp-install-wvkbd"
-  elif command -v squeekboard >/dev/null 2>&1; then
-    warn "wvkbd-deskintl not built — squeekboard fallback will be used"
+    warn "wvkbd-deskintl present but without the lite ▼ build — run $BIN_DIR/tlit-install-wvkbd"
   else
-    bad "no virtual-keyboard backend (wvkbd-deskintl or squeekboard)"; fail=1
+    bad "wvkbd-deskintl is not installed — run $BIN_DIR/tlit-install-wvkbd"; fail=1
   fi
 
   if [ -f "$HYPR_DIR/tablet-lite.lua" ]; then ok "hypr config $HYPR_DIR/tablet-lite.lua"; else bad "hypr config missing"; fail=1; fi
@@ -115,24 +120,33 @@ if [ "$VERIFY" -eq 1 ]; then
   else
     bad "lock-screen VK layer rule missing from $HYPR_DIR/tablet-lite.lua"; fail=1
   fi
-  if "$BIN_DIR/texp-orient" --json >/dev/null 2>&1; then
-    ok "accelerometer readable (texp-orient)"
+  if "$BIN_DIR/tlit-orient" --json >/dev/null 2>&1; then
+    ok "accelerometer readable (tlit-orient)"
   else
-    warn "texp-orient could not read an IIO accelerometer — auto-rotate will not work"
+    warn "tlit-orient could not read an IIO accelerometer — auto-rotate will not work"
   fi
 
   if command -v voxtype >/dev/null 2>&1; then
+    if backend="$(omarchy-default-dictation 2>/dev/null)" && [ -n "$backend" ]; then
+      ok "dictation backend: $backend (the mic button drives omarchy dictation)"
+    else
+      warn "no omarchy dictation backend configured — the mic button falls back to 'voxtype record'"
+    fi
     pp="$(voxtype config get output.post_process.command 2>/dev/null | tr -d '"')"
-    if [ "$pp" = "$BIN_DIR/texp-vtext" ]; then
-      ok "voxtype post_process.command -> texp-vtext"
+    if [ "$pp" = "$BIN_DIR/tlit-vtext" ]; then
+      ok "voxtype post_process.command -> tlit-vtext"
     else
       bad "voxtype post_process.command not wired (got: ${pp:-unset})"; fail=1
     fi
-    if [ -x "$BIN_DIR/texp-voxtype-wire" ] \
-        && "$BIN_DIR/texp-voxtype-wire" --bin "$BIN_DIR" --check >/dev/null 2>&1; then
-      ok "voxtype pre_output_command -> texp-mousehop release"
-    else
+    pre="$(voxtype config get output.pre_output_command 2>/dev/null | tr -d '"')"
+    if [ "$pre" = "$BIN_DIR/tlit-mousehop release" ]; then
+      ok "voxtype pre_output_command -> tlit-mousehop release"
+    elif [ -z "$pre" ] || [ "$pre" = "null" ]; then
       warn "voxtype pre_output_command is not wired (mousehop release hook)"
+    elif [ "${pre##*/}" = "texp-mousehop release" ]; then
+      warn "voxtype pre_output_command still points at the old texp-mousehop — re-run install.sh"
+    else
+      warn "voxtype pre_output_command belongs to someone else ($pre) — left alone"
     fi
     if systemctl --user is-active voxtype.service >/dev/null 2>&1; then
       ok "voxtype service running"
@@ -150,18 +164,71 @@ if [ "$VERIFY" -eq 1 ]; then
     warn "plugin IPC does not answer yet — reload the shell / re-login"
   fi
 
-  [ "$fail" -eq 0 ] && log "self-check passed" || { warn "self-check found problems (see above)"; exit 1; }
+  if [ "$fail" -eq 0 ] && [ ! -e "$HOME/.local/share/texp-ink" ]; then
+    log "self-check passed"
+  elif [ "$fail" -ne 0 ]; then
+    warn "self-check found problems (see above)"; exit 1
+  else
+    warn "self-check passed, but the full plugin's handwriting models are still in"
+    warn "  ~/.local/share/texp-ink (~90 MB) — remove with: ./install.sh --clean-legacy"
+  fi
   exit 0
 fi
 
 [ "$DRY_RUN" -eq 1 ] && log "DRY RUN — nothing will be changed"
 
+# ------------------------------------------------- legacy cleanup only
+# The lite plugin keeps only what it needs. The full plugin
+# (maxt.tablet-experience) and the pre-1.5 lite install left helpers, a 90 MB
+# handwriting model and a disabled hypr config behind; none of it is read by
+# this plugin. Explicit opt-in, because it deletes files outside the repo.
+if [ "$CLEAN_LEGACY" -eq 1 ]; then
+  log "cleaning leftovers of the superseded full plugin / pre-1.5 lite install"
+  freed_before="$(du -scm "$HOME/.local/share/texp-ink" 2>/dev/null | tail -1 | cut -f1)"
+
+  # Helpers that only the full plugin ever used.
+  for s in texp-ink texp-ink-key texp-touch texp-window texp-close \
+           texp-bar-probe texp-hw-laptop-closed texp-kbdetect \
+           texp-sddm-vk texp-priv-install; do
+    [ -e "$BIN_DIR/$s" ] || continue
+    run rm -f "$BIN_DIR/$s" && log "removed $BIN_DIR/$s"
+  done
+
+  # The pre-1.5 lite helpers (now tlit-*). Shared names with the full plugin,
+  # so they go only when that plugin is not installed.
+  if [ -d "$HOME/.config/omarchy/plugins/maxt.tablet-experience" ]; then
+    warn "maxt.tablet-experience is still installed — keeping the shared texp-* helpers"
+  else
+    for s in texp-vk texp-orient texp-rotate texp-mousehop texp-vtext \
+             texp-voxtype-wire texp-install-wvkbd; do
+      [ -e "$BIN_DIR/$s" ] || continue
+      run rm -f "$BIN_DIR/$s" && log "removed stale helper $BIN_DIR/$s"
+    done
+  fi
+
+  # Handwriting recognition models (offline PP-OCRv6, ~90 MB).
+  if [ -d "$HOME/.local/share/texp-ink" ]; then
+    run rm -rf "$HOME/.local/share/texp-ink"
+    log "removed $HOME/.local/share/texp-ink (${freed_before:-?} MB of handwriting models)"
+  fi
+
+  # The full plugin's Hyprland hook, disabled when lite took over.
+  for f in "$HYPR_DIR/tablet-experience.lua" \
+           "$HYPR_DIR/tablet-experience.lua.disabled-lite"; do
+    [ -e "$f" ] || continue
+    run rm -f "$f" && log "removed $f"
+  done
+
+  log "legacy cleanup done"
+  exit 0
+fi
+
 # --------------------------------------------------------------- packages
-# Only the fallback keyboard and the (optional) touch-swipe daemon's evdev
-# binding are packages. voxtype itself is AUR-only and is reported, not
+# wtype is the only package the lite feature set needs: the keyboard is the
+# user-local wvkbd build, and voxtype itself is AUR-only and is reported, not
 # installed silently.
 if [ "$DO_PACKAGES" -eq 1 ] && command -v pacman >/dev/null 2>&1; then
-  REQUIRED=(squeekboard wtype)
+  REQUIRED=(wtype)
   MISSING=()
   for p in "${REQUIRED[@]}"; do
     pacman -Q "$p" >/dev/null 2>&1 || MISSING+=("$p")
@@ -177,14 +244,14 @@ fi
 # ---------------------------------------------------------- helper scripts
 log "installing helper scripts -> $BIN_DIR"
 run mkdir -p "$BIN_DIR"
-for src in "$REPO_ROOT"/scripts/texp-*; do
+for src in "$REPO_ROOT"/scripts/tlit-*; do
   [ -f "$src" ] || continue
   name="$(basename "$src")"
   run install -m 0755 "$src" "$BIN_DIR/$name"
 done
 
 # ------------------------------------------------------------- data files
-# The installed texp-install-wvkbd is in ~/.local/bin and cannot see the repo;
+# The installed tlit-install-wvkbd is in ~/.local/bin and cannot see the repo;
 # keep the patch it applies in a stable data directory.
 LITE_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/tablet-lite"
 run mkdir -p "$LITE_DATA"
@@ -192,14 +259,14 @@ run install -m 0644 "$REPO_ROOT/config/wvkbd/wvkbd-hide-key.patch" "$LITE_DATA/w
 
 # ------------------------------------------------------------- wvkbd build
 if [ "$BUILD_WVKBD" -eq 1 ]; then
-  if [ -x "$BIN_DIR/texp-install-wvkbd" ]; then
-    log "building wvkbd-deskintl (lite ▼ build; best-effort, squeekboard stays)"
-    run "$BIN_DIR/texp-install-wvkbd" || warn "wvkbd build skipped — squeekboard fallback remains"
+  if [ -x "$BIN_DIR/tlit-install-wvkbd" ]; then
+    log "building wvkbd-deskintl (lite ▼ build; best-effort)"
+    run "$BIN_DIR/tlit-install-wvkbd" || warn "wvkbd build skipped — the keyboard stays unavailable until it is built"
   else
-    warn "texp-install-wvkbd missing — skipping the keyboard build"
+    warn "tlit-install-wvkbd missing — skipping the keyboard build"
   fi
 else
-  warn "--no-wvkbd: leaving the keyboard to the squeekboard fallback"
+  warn "--no-wvkbd: no keyboard until tlit-install-wvkbd is run"
 fi
 
 # ------------------------------------------------------------ Hyprland hooks
@@ -234,18 +301,27 @@ if command -v voxtype >/dev/null 2>&1; then
   else
     ok "replacement table present (left untouched): $VT_CONF/replacements.tsv"
   fi
-  run voxtype config set output.post_process.command "$BIN_DIR/texp-vtext"
-  log "voxtype output.post_process.command -> $BIN_DIR/texp-vtext"
+  run voxtype config set output.post_process.command "$BIN_DIR/tlit-vtext"
+  log "voxtype output.post_process.command -> $BIN_DIR/tlit-vtext"
 
-  if [ -x "$BIN_DIR/texp-voxtype-wire" ]; then
-    VW_RC=0
-    run "$BIN_DIR/texp-voxtype-wire" --bin "$BIN_DIR" || VW_RC=$?
-    case $VW_RC in
-      0) : ;;
-      2) warn "voxtype pre_output_command is set by the user — the mousehop release hook stays manual" ;;
-      *) warn "could not wire voxtype pre_output_command (exit $VW_RC)" ;;
-    esac
-  fi
+  # The mousehop release hook runs right before voxtype types, so a software
+  # KVM capture is handed back first. `voxtype config set` knows the key now
+  # (it is in the schema), which is why the old config-file editor is gone.
+  pre="$(voxtype config get output.pre_output_command 2>/dev/null | tr -d '"')"
+  want="$BIN_DIR/tlit-mousehop release"
+  case "$pre" in
+    "$want") ok "voxtype pre_output_command already -> $want" ;;
+    ""|null)
+      run voxtype config set output.pre_output_command "$want"
+      log "voxtype output.pre_output_command -> $want"
+      ;;
+    *texp-mousehop*)
+      # Pre-1.5 install: the hook points at the old helper name.
+      run voxtype config set output.pre_output_command "$want"
+      log "voxtype output.pre_output_command migrated ($pre -> $want)"
+      ;;
+    *) warn "voxtype pre_output_command is set by the user ($pre) — the mousehop release hook stays manual" ;;
+  esac
 
   run systemctl --user restart voxtype 2>/dev/null \
     || warn "could not restart voxtype via systemctl --user — run: systemctl --user restart voxtype"

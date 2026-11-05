@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# texp-rotate — rotate the primary display (detachable tablet experience).
+# tlit-rotate — rotate the primary display (detachable tablet experience).
 #
-# Usage: texp-rotate [-s] [--scale <V>] <0|1|2|3|next|prev>
+# Usage: tlit-rotate [-s] [--scale <V>] <0|1|2|3|next|prev>
 #   -s   silent: skip the OSD notification (used by auto-orientation)
 #   --scale <V>   override the monitor scale instead of preserving the
 #                 current one (the laptop-mode reset restores its snapshot)
@@ -49,7 +49,7 @@ case "$ARG" in
     cur="$(hyprctl monitors -j | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["transform"])' 2>/dev/null || echo 0)"
     if [ "$ARG" = "next" ]; then N=$(( (cur + 1) % 4 )); else N=$(( (cur + 3) % 4 )); fi
     ;;
-  *) echo "usage: texp-rotate [-s] <0|1|2|3|next|prev>" >&2; exit 2 ;;
+  *) echo "usage: tlit-rotate [-s] <0|1|2|3|next|prev>" >&2; exit 2 ;;
 esac
 
 case "$N" in

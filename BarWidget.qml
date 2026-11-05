@@ -4,7 +4,7 @@ import qs.Commons
 import qs.Ui
 
 // Tablet Lite — bar widget: the four entry points this plugin exists for.
-//   ⌨  on-screen keyboard (same as SUPER+U / `texp-vk toggle`)
+//   ⌨  on-screen keyboard (same as SUPER+U / `tlit-vk toggle`)
 //   🎤 voice input overlay (voxtype hold-to-talk)
 //   ⟳  rotation: click = next 90°
 //   🧭  auto-rotate: click = sensor-following on/off

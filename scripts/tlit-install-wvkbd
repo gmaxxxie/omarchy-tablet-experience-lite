@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# texp-install-wvkbd — build wvkbd-deskintl for the current user.
+# tlit-install-wvkbd — build wvkbd-deskintl for the current user.
 #
 # The lite plugin's keyboard is wvkbd-deskintl (deskintl layout): wlroots
 # native, with Ctrl / Super / Alt / Shift / AltGr, F1-F12, a full number row
@@ -10,14 +10,14 @@
 # folds the keyboard away (wvkbd ships no dismiss key).
 #
 # Everything runs as the user and installs to ~/.local/bin — no sudo, no
-# root-owned build tree, no SDDM/greeter copy. texp-vk prefers that path.
-# squeekboard remains the fallback when this build is not present or fails.
+# root-owned build tree, no SDDM/greeter copy. tlit-vk prefers that path, and
+# it is the only backend the lite plugin drives.
 #
 # The archive is verified against a pinned SHA-256 before extraction.
 #
 # Usage:
-#   texp-install-wvkbd            build & install
-#   texp-install-wvkbd --dry-run  preview only
+#   tlit-install-wvkbd            build & install
+#   tlit-install-wvkbd --dry-run  preview only
 # ============================================================================
 set -euo pipefail
 
@@ -65,7 +65,7 @@ if [ "$DRY_RUN" -eq 0 ]; then
   if [ "${#missing[@]}" -gt 0 ]; then
     warn "missing build dependencies: ${missing[*]}"
     warn "install with: sudo pacman -S --needed cairo pango wayland libxkbcommon"
-    warn "until then texp-vk falls back to squeekboard"
+    warn "until then there is no on-screen keyboard (tlit-vk will say so)"
     exit 1
   fi
   for tool in make cc curl tar patch sha256sum; do
@@ -96,7 +96,7 @@ if [ "$DRY_RUN" -eq 0 ]; then
   run mkdir -p "$BIN"
   run install -m 0755 "$src/wvkbd-deskintl" "$DEST"
   log "installed: $DEST"
-  log "texp-vk now prefers this keyboard; squeekboard stays as the fallback"
+  log "tlit-vk now uses this keyboard"
 else
   printf '    would verify SHA-256 %s\n' "$WVKBD_SHA256"
   printf '    would extract, apply patch, make LAYOUT=deskintl\n'

@@ -1,8 +1,8 @@
 -- Tablet Lite — generated configuration (installed by install.sh).
 --
 -- Only what the lite features need:
---   * SUPER+U toggles the on-screen keyboard (texp-vk; wvkbd-deskintl when the
---     lite build is present, squeekboard otherwise).
+--   * SUPER+U toggles the on-screen keyboard (tlit-vk; wvkbd-deskintl, the
+--     only backend).
 --   * SUPER+SHIFT+R asks the plugin for the next 90° rotation, so the angle is
 --     persisted and sensor-following turns off.
 --   * `above_lock 2` keeps wvkbd and the lock-screen keyboard button
@@ -22,11 +22,11 @@ hl.layer_rule({
   above_lock = 2,
 })
 
-hl.bind("SUPER + U", hl.dsp.exec_cmd("texp-vk toggle"), {
+hl.bind("SUPER + U", hl.dsp.exec_cmd("tlit-vk toggle"), {
   description = "Toggle virtual keyboard (wvkbd)",
 })
 
--- Rotation belongs to the plugin (not a bare `texp-rotate next`) so the
+-- Rotation belongs to the plugin (not a bare `tlit-rotate next`) so the
 -- service can persist the angle, turn sensor-following off, and keep the
 -- bar icon/tooltip in sync.
 hl.bind("SUPER + SHIFT + R", hl.dsp.exec_cmd("omarchy-shell maxt.tablet-lite rotationNext"), {

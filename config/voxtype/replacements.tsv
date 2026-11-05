@@ -1,4 +1,4 @@
-# texp-vtext replacement table — ~/.config/voxtype/replacements.tsv
+# tlit-vtext replacement table — ~/.config/voxtype/replacements.tsv
 #
 # Turns ASR phonetics of technical English terms (spoken in mostly-Chinese
 # dictation) back into the correct spelling before voxtype types the text.
@@ -7,7 +7,7 @@
 # Single-ASCII-token sources match case-insensitively at word boundaries
 # (so 'git' never corrupts 'digit'); CJK / phrases are plain substring replace.
 #
-# Iterate by dictating and checking:  echo "把代码推到吉特哈布上" | texp-vtext
+# Iterate by dictating and checking:  echo "把代码推到吉特哈布上" | tlit-vtext
 # then add whatever SenseVoice actually emits on this machine. First match wins.
 
 # --- git / GitHub -----------------------------------------------------

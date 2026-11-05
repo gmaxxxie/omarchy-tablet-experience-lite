@@ -10,23 +10,26 @@ import qs.Commons
 //
 // Rotation: the bar's rotate icon and SUPER+SHIFT+R step the display through
 // 0° / 90° / 180° / 270°; right-clicking the icon (or the IPC method) turns on
-// sensor-following auto-rotate via `texp-orient` (sysfs accelerometer). Every
+// sensor-following auto-rotate via `tlit-orient` (sysfs accelerometer). Every
 // rotation preserves the monitor scale and keeps the touch calibration matrix
-// in step (texp-rotate). The last angle is persisted, so a shell restart does
+// in step (tlit-rotate). The last angle is persisted, so a shell restart does
 // not silently put the screen back to landscape.
 //
 // Voice input: the bar's mic icon opens a bottom hold-to-talk button.
-// Press & hold -> `voxtype record start` (SIGUSR1), release -> `voxtype record
-// stop` (SIGUSR2); voxtype transcribes locally and types the text at the
-// cursor with wtype (CJK works everywhere). Delete / Clear / Enter fix or
-// submit the dictated line, the left-side caret pad moves through it, and the
-// expandable "CLI keys" grid sends esc / / / tab / ⇧tab / ⌃C / ⌃D / ⌃J / ⌃T
-// for pi / codex CLI on a touch-only screen. The pad is voice-mode only —
-// with the keyboard up, the keyboard itself carries those keys. The overlay
-// follows voxtype's own state file, so the visuals agree with the F9 /
-// SUPER+CTRL+X hotkeys too.
+// Press & hold -> `omarchy dictation start`, release -> `omarchy dictation
+// stop` (falling back to `voxtype record ...` when no backend is configured):
+// omarchy 4.5 owns the backend choice (voxtype, superwhisper, ...) and the
+// same commands the ALT+SPACE / Alt_R / F9 hotkeys use, so the touch button
+// and the keyboard cannot drift apart. The backend transcribes locally and
+// types the text at the cursor with wtype (CJK works everywhere). Delete /
+// Clear / Enter fix or submit the dictated line, the left-side caret pad
+// moves through it, and the expandable "CLI keys" grid sends esc / / / tab /
+// ⇧tab / ⌃C / ⌃D / ⌃J / ⌃T for pi / codex CLI on a touch-only screen. The pad
+// is voice-mode only — with the keyboard up, the keyboard itself carries
+// those keys. The overlay follows voxtype's state file when voxtype is the
+// backend, so the visuals agree with the F9 / SUPER+CTRL+X hotkeys too.
 //
-// Virtual keyboard: `texp-vk` drives wvkbd-deskintl (a wlroots-native build
+// Virtual keyboard: `tlit-vk` drives wvkbd-deskintl (a wlroots-native build
 // with Ctrl/Super/Alt, F-keys, a number row and arrows). Controllable from
 // the bar icon, SUPER+U, or `omarchy-shell maxt.tablet-lite keyboardToggle`.
 // Visibility is read from `hyprctl layers`, so the keyboard's own ▼ collapse
@@ -44,23 +47,30 @@ import qs.Commons
 Item {
   id: root
 
-  Component.onCompleted: console.log("tablet-lite Service LOADED v" + root.pluginVersion)
+  Component.onCompleted: {
+    console.log("tablet-lite Service LOADED v" + root.pluginVersion)
+    root.probeDictation()
+  }
 
   property var shell: null
-  readonly property string pluginVersion: "1.4.2"
+  readonly property string pluginVersion: "1.5.0"
 
-  // Voice input (voxtype hold-to-talk overlay).
+  // Voice input (hold-to-talk overlay).
   //   voiceInputOpen  the bottom hold-to-talk overlay is showing
   //   holding         our button is pressed (authority for start/stop)
-  //   recording       voxtype state file says recording/streaming
-  //   transcribing    voxtype state file says transcribing/outputting
-  //   voxtypeUp       voxtype state file readable => daemon running
+  //   recording       backend state file says recording/streaming
+  //   transcribing    backend state file says transcribing/outputting
+  //   voxtypeUp       backend usable (state file readable, or a non-voxtype
+  //                   omarchy dictation backend is configured)
+  //   dictationBackend  `omarchy-default-dictation` output; empty = use the
+  //                   bare `voxtype record` path
   property bool voiceInputOpen: false
   property bool cliKeysOpen: false
   property bool holding: false
   property bool recording: false
   property bool transcribing: false
   property bool voxtypeUp: false
+  property string dictationBackend: ""
 
   // On-screen keyboard visibility (the CLI/caret pad is voice-mode only and
   // deliberately does not float above the keyboard).
@@ -179,13 +189,13 @@ Item {
     osdCmd.running = true
   }
 
-  // Apply one absolute transform. `silent` suppresses the texp-rotate OSD
+  // Apply one absolute transform. `silent` suppresses the tlit-rotate OSD
   // (used for startup restore and sensor-following); manual actions show it.
   function applyRotation(value, silent) {
     if (rotateCmd.running) return false
     var t = String(value || "0")
     if (root.rotationRing.indexOf(t) === -1) t = "0"
-    var cmd = ["texp-rotate"]
+    var cmd = ["tlit-rotate"]
     if (silent) cmd.push("-s")
     cmd.push(t)
     rotateCmd.command = cmd
@@ -202,7 +212,7 @@ Item {
     persisted.autoOrient = false
     root.appliedFor = ""
     root.pendingRelative = true
-    rotateCmd.command = ["texp-rotate", dir]
+    rotateCmd.command = ["tlit-rotate", dir]
     rotateCmd.running = true
   }
 
@@ -267,6 +277,7 @@ Item {
   function showVoiceInput() {
     root.voiceInputOpen = true
     root.releaseMousehop()   // keys from this overlay must land here
+    root.probeDictation()    // a backend may have been configured since start
     root.pollVoxtype()       // refresh daemon state the moment it appears
     // Voice input and the virtual keyboard are mutually exclusive.
     if (root.vkVisible) root.hideVk()
@@ -280,22 +291,34 @@ Item {
     root.cliKeysOpen = false
   }
 
-  // Press = `voxtype record start`; gated locally so a repeated press while
-  // already holding cannot double-start the daemon.
+  // Press = start recording; gated locally so a repeated press while already
+  // holding cannot double-start the backend. `omarchy dictation` when a
+  // backend is configured (it respects the user's voxtype/superwhisper choice
+  // and its lock), otherwise the voxtype-specific command.
   function startRecording() {
     if (root.holding || root.recording) return
     root.holding = true
-    vxCmd.command = ["voxtype", "record", "start"]
+    vxCmd.command = root.dictationBackend
+      ? ["omarchy", "dictation", "start"]
+      : ["voxtype", "record", "start"]
     vxCmd.running = true
   }
 
-  // Release = `voxtype record stop` -> transcribe + type at the cursor. Sent
-  // unconditionally on our own release (harmless when idle) so a very fast tap
-  // that the state poll never saw still ends its recording.
+  // Release = stop -> transcribe + type at the cursor. Sent unconditionally on
+  // our own release (harmless when idle) so a very fast tap that the state
+  // poll never saw still ends its recording.
   function stopRecording() {
     root.holding = false
-    vxCmd.command = ["voxtype", "record", "stop"]
+    vxCmd.command = root.dictationBackend
+      ? ["omarchy", "dictation", "stop"]
+      : ["voxtype", "record", "stop"]
     vxCmd.running = true
+  }
+
+  // Which dictation backend omarchy has selected: "" when none is configured
+  // (then the raw voxtype path is the only thing that can work).
+  function probeDictation() {
+    if (!dictationProbe.running) dictationProbe.running = true
   }
 
   function sendEnter() {
@@ -339,7 +362,7 @@ Item {
   // ---- virtual keyboard --------------------------------------------------
 
   function hideVk() {
-    vkCmd.command = ["texp-vk", "hide"]
+    vkCmd.command = ["tlit-vk", "hide"]
     vkCmd.running = true
   }
 
@@ -347,7 +370,7 @@ Item {
     // The voice overlay occupies the same bottom strip.
     if (root.voiceInputOpen) root.hideVoiceInput()
     root.releaseMousehop()   // the keyboard types into the focused app
-    vkCmd.command = ["texp-vk", "show"]
+    vkCmd.command = ["tlit-vk", "show"]
     vkCmd.running = true
   }
 
@@ -366,13 +389,13 @@ Item {
   // the session is already locked (the flaky corner for ext-session-lock).
   function preStartVk() {
     if (vkCmd.running) return
-    vkCmd.command = ["texp-vk", "start-hidden"]
+    vkCmd.command = ["tlit-vk", "start-hidden"]
     vkCmd.running = true
   }
 
   function releaseMousehop() {
     if (mousehopCmd.running) return
-    mousehopCmd.command = ["texp-mousehop", "release"]
+    mousehopCmd.command = ["tlit-mousehop", "release"]
     mousehopCmd.running = true
   }
 
@@ -390,10 +413,17 @@ Item {
     if (!vkProbe.running) vkProbe.running = true
   }
 
-  // Voxtype state names: idle / recording / transcribing / outputting /
-  // streaming / eager-recording (written to the state file).
+  // Backend state names: idle / recording / transcribing / outputting /
+  // streaming / eager-recording (written to voxtype's state file). A backend
+  // without a state file (superwhisper) is driven by our own press events.
   function updateVoxtypeState(name) {
     var n = String(name || "").trim().toLowerCase()
+    if (root.dictationBackend && root.dictationBackend !== "voxtype") {
+      root.voxtypeUp = true
+      root.recording = root.holding
+      root.transcribing = false
+      return
+    }
     root.voxtypeUp = n !== ""
     root.recording = (n === "recording" || n === "streaming" || n === "eager-recording")
     root.transcribing = (n === "transcribing" || n === "outputting")
@@ -489,6 +519,13 @@ Item {
     }
   }
 
+  // The configured dictation backend (omarchy 4.5 owns that choice).
+  BoundedProcess {
+    id: dictationProbe
+    command: ["omarchy-default-dictation"]
+    onStreamFinished: root.dictationBackend = String(output || "").trim()
+  }
+
   // Voxtype live state — same state file `voxtype status` reads, so the
   // hold-to-talk visuals agree with the F9 / SUPER+CTRL+X hotkeys as well.
   // The daemon removes the file on exit, so an empty read = daemon down.
@@ -505,11 +542,11 @@ Item {
     onFileChanged: if (!vxStateProbe.running) vxStateProbe.running = true
   }
 
-  // Rotation probes: the sensor posture (texp-orient reads sysfs, no daemon)
+  // Rotation probes: the sensor posture (tlit-orient reads sysfs, no daemon)
   // and the current monitor transform (to adopt the angle on first install).
   BoundedProcess {
     id: orientationProbe
-    command: ["texp-orient", "--json"]
+    command: ["tlit-orient", "--json"]
     onStreamFinished: {
       var o = "unknown"
       try {
@@ -599,7 +636,7 @@ Item {
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: {
-              if (!root.voxtypeUp) return "Voxtype not running"
+              if (!root.voxtypeUp) return "Dictation not running"
               if (root.transcribing) return "Transcribing…"
               if (root.holding || root.recording) return "Release to finish"
               return "Hold to talk"
@@ -948,6 +985,7 @@ Item {
         cliKeysOpen: root.cliKeysOpen,
         voiceRecording: root.recording,
         voxtypeUp: root.voxtypeUp,
+        dictationBackend: root.dictationBackend,
         vkVisible: root.vkVisible,
         rotation: root.rotation,
         rotationLabel: root.rotationLabel(root.rotation),

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-texp-vtext — voxtype post-processing: technical-term replacement table.
+tlit-vtext — voxtype post-processing: technical-term replacement table.
 
 Hooked into voxtype's `output.post_process.command` so dictated text is
 cleaned up BEFORE it is typed. Use case: dictating mostly in Chinese while
@@ -21,9 +21,9 @@ Matching rules:
   * anything else (CJK text, multi-word phrases) is a plain substring replace.
 
 Usage:
-  echo "把代码推到吉特哈布上" | texp-vtext          # -> 把代码推到github上
-  texp-vtext test < input.txt                       # show input/output/matches
-  texp-vtext --table <file> < input.txt             # use a different table
+  echo "把代码推到吉特哈布上" | tlit-vtext          # -> 把代码推到github上
+  tlit-vtext test < input.txt                       # show input/output/matches
+  tlit-vtext --table <file> < input.txt             # use a different table
 """
 import os
 import re
@@ -86,7 +86,7 @@ def main():
     text = sys.stdin.read()
     pairs = load_table(table)
     if test_mode:
-        print("=== texp-vtext test ===")
+        print("=== tlit-vtext test ===")
         print(f"table : {table} ({len(pairs)} rules)")
         print("input :", repr(text))
         matched = []

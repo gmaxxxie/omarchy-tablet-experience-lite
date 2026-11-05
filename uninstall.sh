@@ -49,17 +49,17 @@ remove_if_same "$HYPR_DIR/tablet-lite.lua" \
 
 # ------------------------------------------------ voxtype wiring
 if command -v voxtype >/dev/null 2>&1; then
-  if [ -x "$BIN_DIR/texp-voxtype-wire" ]; then
-    VW_RC=0
-    run "$BIN_DIR/texp-voxtype-wire" --uninstall || VW_RC=$?
-    case $VW_RC in
-      0) log "voxtype: removed the pre_output_command (mousehop release hook)" ;;
-      1) log "voxtype: no pre_output_command hook to remove" ;;
-      *) warn "voxtype pre_output_command not removed (exit $VW_RC) — check ~/.config/voxtype/config.toml" ;;
-    esac
-  fi
+  pre="$(voxtype config get output.pre_output_command 2>/dev/null | tr -d '"')"
+  case "$pre" in
+    "$BIN_DIR/tlit-mousehop release"|*texp-mousehop*)
+      run voxtype config unset output.pre_output_command
+      log "voxtype: unset output.pre_output_command (was the mousehop release hook)"
+      ;;
+    ""|null) : ;;
+    *) warn "voxtype pre_output_command is not ours ($pre) — left in place" ;;
+  esac
   cur="$(voxtype config get output.post_process.command 2>/dev/null | tr -d '"')"
-  if [ "$cur" = "$BIN_DIR/texp-vtext" ]; then
+  if [ "$cur" = "$BIN_DIR/tlit-vtext" ]; then
     run voxtype config unset output.post_process.command
     log "voxtype: unset output.post_process.command (was $cur)"
   elif [ -n "$cur" ] && [ "$cur" != "null" ]; then
@@ -70,7 +70,7 @@ if command -v voxtype >/dev/null 2>&1; then
 fi
 
 # ------------------------------------------------ helper scripts
-for src in "$REPO_ROOT"/scripts/texp-*; do
+for src in "$REPO_ROOT"/scripts/tlit-*; do
   [ -f "$src" ] || continue
   remove_if_same "$BIN_DIR/$(basename "$src")" "$src" "helper script"
 done
@@ -100,8 +100,12 @@ Done.
 
 Kept on purpose:
   - ~/.config/voxtype/replacements.tsv (user data)
-  - packages: squeekboard, wtype (shared system packages)
+  - the wtype package (shared system package)
   - the voxtype service (still used by the F9 / SUPER+CTRL+X hotkeys)
+
+Helpers are installed as tlit-*; the pre-1.5 texp-* copies are no longer used.
+If this machine still carries them plus the full plugin's leftovers, run:
+  ./install.sh --clean-legacy
 
 Remove the plugin itself:
   omarchy plugin remove maxt.tablet-lite
