@@ -127,6 +127,12 @@ omarchy plugin remove maxt.tablet-lite
 helper 都以 `tlit-*` 装进 `~/.local/bin`，刻意与 full 插件的 `texp-*` 分开：
 两个插件可以并存，不会互相覆盖对方的键盘 helper。
 
+其中 `mousehop`、`rotate`、`vtext` 与 full 插件的 `texp-*` 是**同一份程序**
+（只有前缀不同），`vk`、`orient`、`install-wvkbd`、`state` 是 lite 独有。
+`tools/helper-drift` 会拿这三份和 full 插件检出目录（`$TEXP_UPSTREAM`，默认
+`../omarchy-tablet-experience`）比对，`--sync` 把 lite 的版本覆盖过去（改前缀）
+——所以同一处只写一次。
+
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。由同一作者的 omarchy-tablet-experience 精简而来。

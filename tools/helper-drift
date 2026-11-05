@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# ============================================================================
+# helper-drift — are the helpers shared with the full plugin still one program?
+#
+# Tablet Lite inherits several helpers from omarchy-tablet-experience (the full
+# plugin). Since v1.5 both plugins install their own names — tlit-* here,
+# texp-* there — so nothing collides at runtime, but a fix made in one copy can
+# silently rot in the other.
+#
+# This compares the copies that must stay identical after normalizing the
+# prefix, and lists the ones that deliberately diverged:
+#
+#   shared (must match):   mousehop  rotate  vtext
+#   lite-only (no sync):   vk  orient  install-wvkbd  state
+#
+# The lite-only ones differ by design: no touch-gesture daemon or squeekboard
+# fallback (vk), a streaming --watch mode (orient), the v0.21 pin and --check
+# (install-wvkbd), and the preference file (state).
+#
+# Usage:
+#   tools/helper-drift                    report; exit 1 when a shared helper
+#                                         drifted
+#   tools/helper-drift --sync             copy lite -> upstream (prefix renamed)
+#   tools/helper-drift --upstream DIR     other checkout; default $TEXP_UPSTREAM
+#                                         or ../omarchy-tablet-experience
+# ============================================================================
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+UPSTREAM="${TEXP_UPSTREAM:-$(cd "$REPO_ROOT/.." 2>/dev/null && pwd)/omarchy-tablet-experience}"
+SYNC=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --sync) SYNC=1; shift ;;
+    --upstream) UPSTREAM="${2:-}"; shift 2 ;;
+    --upstream=*) UPSTREAM="${1#--upstream=}"; shift ;;
+    -h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
+  esac
+done
+
+SHARED=(mousehop rotate vtext)
+LITE_ONLY=(vk orient install-wvkbd state)
+
+log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+bad()  { printf '\033[1;31m  !! \033[0m %s\n' "$*" >&2; }
+ok()   { printf '\033[1;32m  ok\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*" >&2; }
+
+if [ ! -d "$UPSTREAM/scripts" ]; then
+  warn "no upstream checkout at $UPSTREAM — pass --upstream DIR or set TEXP_UPSTREAM"
+  exit 2
+fi
+
+log "comparing with $UPSTREAM/scripts"
+drift=0
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
+for name in "${SHARED[@]}"; do
+  ours="$REPO_ROOT/scripts/tlit-$name"
+  theirs="$UPSTREAM/scripts/texp-$name"
+  if [ ! -f "$ours" ]; then
+    bad "missing lite helper: $ours"; drift=1; continue
+  fi
+  if [ ! -f "$theirs" ]; then
+    bad "missing upstream helper: $theirs"; drift=1; continue
+  fi
+  sed 's/tlit-/texp-/g' "$ours" >"$tmp"
+  if cmp -s "$tmp" "$theirs"; then
+    ok "$name: identical (as texp-$name)"
+    continue
+  fi
+  drift=1
+  if [ "$SYNC" -eq 1 ]; then
+    cp "$tmp" "$theirs"
+    log "$name: synced upstream -> $theirs (as texp-$name)"
+  else
+    bad "$name: drifted from upstream texp-$name"
+    diff -u "$theirs" "$tmp" | sed -n '1,40p' >&2 || true
+  fi
+done
+
+for name in "${LITE_ONLY[@]}"; do
+  [ -f "$REPO_ROOT/scripts/tlit-$name" ] || { bad "missing lite helper: tlit-$name"; drift=1; }
+done
+printf '    lite-only (by design): %s\n' "${LITE_ONLY[*]}"
+
+if [ "$drift" -eq 1 ]; then
+  [ "$SYNC" -eq 1 ] && { log "shared helpers now in sync"; exit 0; }
+  warn "shared helpers drifted — review the diff above, then rerun with --sync"
+  exit 1
+fi
+
+log "shared helpers in sync"

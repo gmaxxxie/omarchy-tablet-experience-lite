@@ -138,6 +138,7 @@ scripts/tlit-state      rotation + auto preference file (survives restarts)
 scripts/tlit-orient     IIO accelerometer posture probe (auto-rotate)
 scripts/tlit-vtext      voxtype post-processing (technical-term table)
 scripts/tlit-mousehop   hand a software-KVM input capture back before typing
+tools/helper-drift      is the copy shared with the full plugin still the same code?
 config/hypr/tablet-lite.lua  SUPER+U + SUPER+SHIFT+R + above_lock rule
 config/wvkbd/wvkbd-hide-key.patch  ▼ collapse key
 config/voxtype/replacements.tsv    default replacement table
@@ -146,6 +147,13 @@ config/voxtype/replacements.tsv    default replacement table
 Helpers are installed in `~/.local/bin` as `tlit-*`, deliberately apart from
 the full plugin's `texp-*` set: both plugins can be installed side by side
 without one overwriting the other's keyboard helper.
+
+`mousehop`, `rotate` and `vtext` are literally the same program as the full
+plugin's `texp-*` copies (only the prefix differs); `vk`, `orient`,
+`install-wvkbd` and `state` are lite-only. `tools/helper-drift` checks the three
+shared ones against a full-plugin checkout (`$TEXP_UPSTREAM`, default
+`../omarchy-tablet-experience`) and `--sync` copies the lite version over,
+prefix renamed — so a fix is written once.
 
 ## Uninstall
 

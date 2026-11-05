@@ -53,7 +53,7 @@ Item {
   }
 
   property var shell: null
-  readonly property string pluginVersion: "1.8.0"
+  readonly property string pluginVersion: "1.9.0"
 
   // ---- labels -------------------------------------------------------------
   // The shell's language (~/.config/omarchy/language, which omarchy exposes as

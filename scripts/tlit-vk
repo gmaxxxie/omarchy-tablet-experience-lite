@@ -32,6 +32,7 @@ import json
 import os
 import re
 import select
+import signal
 import shutil
 import subprocess
 import sys
@@ -134,12 +135,47 @@ def vk_binary():
     return shutil.which(VK_WVKBD) or ""
 
 
-def vk_running():
+def vk_pids():
+    """[(pid, argv0)] for processes named wvkbd-deskintl, newest last.
+
+    Read from /proc instead of `pgrep`: this runs in start_vk's wait loop and
+    on every toggle, and a fork+exec costs more than the whole scan. The argv0
+    tells our user build apart from a copy the full plugin may have installed
+    (both are named wvkbd-deskintl, so `pkill -x` would signal both).
+    """
+    found = []
     try:
-        return bool(run_cap(["pgrep", "-x", VK_WVKBD], timeout=3,
-                            max_bytes=4096).strip())
-    except Exception:
-        return False
+        entries = os.listdir("/proc")
+    except OSError:
+        return found
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        base = "/proc/" + entry
+        try:
+            with open(base + "/comm") as fh:
+                if fh.read().strip() != VK_WVKBD:
+                    continue
+            with open(base + "/cmdline", "rb") as fh:
+                argv0 = fh.read().split(b"\0")[0].decode("utf-8", "replace")
+        except OSError:
+            continue
+        found.append((int(entry), argv0))
+    found.sort()
+    return found
+
+
+def vk_pid():
+    """PID to signal: our user build when it is the one running, else any."""
+    pids = vk_pids()
+    for pid, argv0 in pids:
+        if argv0 == VK_WVKBD_LOCAL:
+            return pid
+    return pids[-1][0] if pids else None
+
+
+def vk_running():
+    return bool(vk_pids())
 
 
 def vk_visible():
@@ -219,9 +255,15 @@ def start_vk():
 def set_visible(visible):
     if not start_vk():
         return False
-    # wvkbd: SIGUSR2 = show, SIGUSR1 = hide
-    subprocess.run(["pkill", "-USR2" if visible else "-USR1", "-x", VK_WVKBD],
-                   capture_output=True, timeout=3)
+    # wvkbd: SIGUSR2 = show, SIGUSR1 = hide. Signal the PID we found instead of
+    # `pkill -x`, which would also hit another wvkbd-deskintl build.
+    pid = vk_pid()
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, signal.SIGUSR2 if visible else signal.SIGUSR1)
+    except (ProcessLookupError, PermissionError):
+        return False
     write_state(visible)
     return True
 
